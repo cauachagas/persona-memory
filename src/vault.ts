@@ -27,13 +27,16 @@ export function resolveSafePath(vaultRoot: string, requestPath: string): { relat
   const normalized = path.normalize(cleaned);
   const absolutePath = path.resolve(normalizedVaultRoot, normalized);
 
-  if (!absolutePath.startsWith(normalizedVaultRoot) && !absolutePath.startsWith(realVaultRoot)) {
+  const isInside = (root: string, candidate: string): boolean =>
+    candidate === root || candidate.startsWith(root + path.sep);
+
+  if (!isInside(normalizedVaultRoot, absolutePath) && !isInside(realVaultRoot, absolutePath)) {
     throw new Error("Access denied: path '" + requestPath + "' escapes the vault boundary");
   }
 
   if (fs.existsSync(absolutePath)) {
     const real = fs.realpathSync(absolutePath);
-    if (!real.startsWith(realVaultRoot)) {
+    if (!isInside(realVaultRoot, real)) {
       throw new Error("Access denied: symlink '" + requestPath + "' points outside vault");
     }
   }

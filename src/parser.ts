@@ -119,6 +119,9 @@ export function validateDocument(doc: OKFDocument): ValidationIssue[] {
     if (!doc.frontmatter.persona_memory_version) {
       issues.push({ severity: "WARNING", message: "index.md missing persona_memory_version" });
     }
+    if (!doc.content.includes("<!-- persona:managed-start -->") || !doc.content.includes("<!-- persona:managed-end -->")) {
+      issues.push({ severity: "WARNING", message: "index.md missing managed section markers (<!-- persona:managed-start --> / <!-- persona:managed-end -->)" });
+    }
     return issues;
   }
 
@@ -145,6 +148,14 @@ export function validateDocument(doc: OKFDocument): ValidationIssue[] {
     issues.push({ severity: "WARNING", message: "Document " + doc.path + " has unknown type: '" + doc.type + "'" });
   }
 
+  // Evidence size limit is a persona-memory profile rule (§13), not OKF: warn, don't fail.
+  if (doc.type === "evidence") {
+    const sizeBytes = Buffer.byteLength(doc.content, "utf8");
+    if (sizeBytes > 100 * 1024) {
+      issues.push({ severity: "WARNING", message: "Document " + doc.path + " exceeds the 100 KB evidence profile limit (" + sizeBytes + " bytes)" });
+    }
+  }
+
   if (doc.persona && doc.persona.state) {
     const s = doc.persona.state;
     if ((doc.type === "belief" || doc.type === "heuristic") && !["current", "superseded"].includes(s)) {
@@ -155,6 +166,8 @@ export function validateDocument(doc: OKFDocument): ValidationIssue[] {
       issues.push({ severity: "WARNING", message: "Unexpected persona.state '" + s + "' for project" });
     } else if (doc.type === "cognitive_event" && !["draft", "reviewed", "accepted", "rejected"].includes(s)) {
       issues.push({ severity: "WARNING", message: "Unexpected persona.state '" + s + "' for cognitive_event" });
+    } else if (doc.type === "evidence" && !["retained", "redacted"].includes(s)) {
+      issues.push({ severity: "WARNING", message: "Unexpected persona.state '" + s + "' for evidence" });
     }
   }
 

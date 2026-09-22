@@ -10,15 +10,24 @@ export function getPersonaContext(
   vaultRoot: string,
   options: { scope?: string[]; include_history?: boolean; max_results?: number; max_chars?: number } = {}
 ): string {
-  const { scope = ["heuristics", "beliefs", "competencies"], include_history = false, max_chars = 4000 } = options;
+  const { scope = ["heuristics", "beliefs", "competencies"], include_history = false, max_results = 20, max_chars = 4000 } = options;
   const docs = loadAllDocuments(vaultRoot);
+
+  // §22: draft, rejected e superseded ficam fora do contexto normal;
+  // aparecem apenas com include_history = true.
+  const isExcluded = (d: { status: string; persona?: Record<string, any> }): boolean => {
+    if (include_history) return false;
+    if (d.status === "draft") return true;
+    const state = d.persona?.state;
+    return state === "draft" || state === "superseded" || state === "rejected";
+  };
 
   const lines: string[] = ["# Persona Context Briefing\n"];
 
   if (scope.includes("heuristics")) {
     lines.push("## Heuristics");
-    for (const d of docs.filter((d) => d.type === "heuristic")) {
-      if (!include_history && d.persona?.state === "superseded") continue;
+    const items = docs.filter((d) => d.type === "heuristic" && !isExcluded(d)).slice(0, max_results);
+    for (const d of items) {
       lines.push("* " + d.title + ": " + d.description + " [trust: " + d.trust + "]");
     }
     lines.push("");
@@ -26,8 +35,8 @@ export function getPersonaContext(
 
   if (scope.includes("beliefs")) {
     lines.push("## Architectural Beliefs");
-    for (const d of docs.filter((d) => d.type === "belief")) {
-      if (!include_history && d.persona?.state === "superseded") continue;
+    const items = docs.filter((d) => d.type === "belief" && !isExcluded(d)).slice(0, max_results);
+    for (const d of items) {
       lines.push("* " + d.title + ": " + d.description + " [trust: " + d.trust + "]");
     }
     lines.push("");
@@ -35,7 +44,8 @@ export function getPersonaContext(
 
   if (scope.includes("competencies")) {
     lines.push("## Competencies & Active Frontiers");
-    for (const d of docs.filter((d) => d.type === "competency")) {
+    const items = docs.filter((d) => d.type === "competency" && !isExcluded(d)).slice(0, max_results);
+    for (const d of items) {
       const state = d.persona?.state || "consolidated";
       lines.push("* " + d.title + " (" + state + "): " + d.description);
     }
@@ -43,10 +53,10 @@ export function getPersonaContext(
   }
 
   if (include_history) {
-    const events = docs.filter((d) => d.type === "cognitive_event");
+    const events = docs.filter((d) => d.type === "cognitive_event").slice(0, max_results);
     if (events.length > 0) {
       lines.push("## Recent Cognitive Events");
-      for (const e of events.slice(0, 5)) {
+      for (const e of events) {
         lines.push("* " + e.title + " (" + (e.persona?.state || e.status) + "): " + e.description);
       }
       lines.push("");

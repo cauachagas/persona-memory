@@ -71,7 +71,7 @@ export function updateManagedIndex(vaultRoot: string): void {
   }
 
   if (events.length > 0) {
-    managed += "\n## Recent Events\n\n";
+    managed += "\n## Events\n\n";
     for (const e of events.slice(0, 10)) {
       managed += "* [" + e.title + "](" + e.path + ") - " + e.description + "\n";
     }
@@ -115,6 +115,15 @@ export async function recordCognitiveEvent(
     const kindsRequiringTarget = ["belief_change", "belief_challenge", "competency_milestone", "project_lesson"];
     if (kindsRequiringTarget.includes(input.event_kind) && !input.target) {
       throw new Error("Target is required for event_kind '" + input.event_kind + "'");
+    }
+
+    // 2b. Validate target paths exist inside the vault jail
+    const pathsToCheck = [...(input.target ? [input.target] : []), ...(input.related_paths || [])];
+    for (const p of pathsToCheck) {
+      const { absolutePath, relativePath } = resolveSafePath(vaultRoot, p);
+      if (!fs.existsSync(absolutePath) || !fs.statSync(absolutePath).isFile()) {
+        throw new Error("Target path does not exist in vault: '" + relativePath + "'");
+      }
     }
 
     // 3. Collision-free filename generation: events/YYYY-MM-DD-<slug>.md
@@ -184,7 +193,8 @@ export async function recordCognitiveEvent(
     // 6. Update log.md (newest first under date heading)
     let logContent = fs.existsSync(logPath) ? fs.readFileSync(logPath, "utf8") : "# Mutation Log\n";
     const header = "## " + dateStr;
-    const logEntry = "- **Created** `" + candidateName + "`";
+    const commitMsg = "memory(event): " + baseSlug.replace(/-/g, " ");
+    const logEntry = "- **Created** `" + candidateName + "`\n  `" + commitMsg + "`";
 
     if (logContent.includes(header)) {
       logContent = logContent.replace(header, header + "\n\n" + logEntry);
@@ -199,7 +209,6 @@ export async function recordCognitiveEvent(
     // 8. Explicit Git staging and commit
     const filesToStage = [candidateName, "log.md", "index.md"];
     await addFiles(vaultRoot, filesToStage);
-    const commitMsg = "memory(event): " + baseSlug.replace(/-/g, " ");
     const commitOutput = await commit(vaultRoot, commitMsg);
 
     return {

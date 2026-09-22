@@ -5,7 +5,7 @@ import path from "node:path";
 import { execSync } from "node:child_process";
 import { getConfig } from "./config.js";
 import { runServer } from "./server.js";
-import { loadAllDocuments } from "./vault.js";
+import { loadAllDocuments, getAllDocumentPaths, readDocument } from "./vault.js";
 import { validateDocument } from "./parser.js";
 import { searchMemory } from "./search.js";
 import { updateManagedIndex } from "./mutations.js";
@@ -41,11 +41,19 @@ async function main() {
         process.exit(1);
       }
 
-      const docs = loadAllDocuments(config.vaultPath);
+      const docPaths = getAllDocumentPaths(config.vaultPath);
       let errorsCount = 0;
       let warningsCount = 0;
 
-      for (const doc of docs) {
+      for (const docPath of docPaths) {
+        let doc;
+        try {
+          doc = readDocument(config.vaultPath, docPath);
+        } catch (e: any) {
+          errorsCount++;
+          console.error("  [ERROR] " + docPath + ": unparseable document (" + e.message + ")");
+          continue;
+        }
         const issues = validateDocument(doc);
         for (const issue of issues) {
           if (issue.severity === "ERROR") {
@@ -61,7 +69,7 @@ async function main() {
         }
       }
 
-      console.log("\nValidation finished: " + docs.length + " documents, " + errorsCount + " errors, " + warningsCount + " warnings.");
+      console.log("\nValidation finished: " + docPaths.length + " documents, " + errorsCount + " errors, " + warningsCount + " warnings.");
       if (errorsCount > 0) {
         process.exit(1);
       }
@@ -96,6 +104,12 @@ async function main() {
       // Vault existence and git status
       if (fs.existsSync(config.vaultPath)) {
         console.log("  ✅ Vault directory exists");
+        try {
+          fs.accessSync(config.vaultPath, fs.constants.R_OK | fs.constants.W_OK);
+          console.log("  ✅ Vault is readable and writable");
+        } catch {
+          console.error("  ❌ Vault directory is not readable/writable: " + config.vaultPath);
+        }
         if (fs.existsSync(path.join(config.vaultPath, ".git"))) {
           console.log("  ✅ Vault is a Git repository");
           try {
