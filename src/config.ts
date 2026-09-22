@@ -3,6 +3,7 @@ import os from "node:os";
 
 export interface PersonaMemoryConfig {
   vaultPath: string;
+  producer: string;
 }
 
 export function resolveVaultPath(cliVaultArg?: string): string {
@@ -13,8 +14,13 @@ export function resolveVaultPath(cliVaultArg?: string): string {
   return path.resolve(target);
 }
 
-export function getConfig(cliVaultArg?: string): PersonaMemoryConfig {
+export function resolveProducer(cliProducerArg?: string): string {
+  return cliProducerArg || process.env.PERSONA_MEMORY_PRODUCER || "persona-memory/0.1";
+}
+
+export function getConfig(cliVaultArg?: string, cliProducerArg?: string): PersonaMemoryConfig {
   return {
     vaultPath: resolveVaultPath(cliVaultArg),
+    producer: resolveProducer(cliProducerArg),
   };
 }

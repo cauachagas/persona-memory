@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { parseDocument } from "./parser.js";
-import { OKFDocument } from "../domain/document.js";
+import { parseDocument, OKFDocument } from "./parser.js";
 
 const RECOGNIZED_DIRS = [
   "heuristics",
@@ -39,7 +38,8 @@ export function resolveSafePath(vaultRoot: string, requestPath: string): { relat
     }
   }
 
-  const relativePath = path.relative(normalizedVaultRoot, absolutePath).replace(/\\/g, "/");
+  const rel = path.relative(normalizedVaultRoot, absolutePath).replace(/\\/g, "/");
+  const relativePath = rel.startsWith("/") ? rel : "/" + rel;
   return { relativePath, absolutePath };
 }
 
@@ -47,10 +47,10 @@ export function getAllDocumentPaths(vaultRoot: string): string[] {
   const result: string[] = [];
 
   if (fs.existsSync(path.join(vaultRoot, "index.md"))) {
-    result.push("index.md");
+    result.push("/index.md");
   }
   if (fs.existsSync(path.join(vaultRoot, "log.md"))) {
-    result.push("log.md");
+    result.push("/log.md");
   }
 
   for (const dir of RECOGNIZED_DIRS) {
@@ -59,7 +59,7 @@ export function getAllDocumentPaths(vaultRoot: string): string[] {
       const files = fs.readdirSync(fullDir, { recursive: true }) as string[];
       for (const file of files) {
         if (file.endsWith(".md") && !file.startsWith(".")) {
-          const rel = path.join(dir, file).replace(/\\/g, "/");
+          const rel = "/" + path.join(dir, file).replace(/\\/g, "/");
           result.push(rel);
         }
       }
@@ -92,7 +92,7 @@ export function loadAllDocuments(vaultRoot: string): OKFDocument[] {
 }
 
 export async function writeDocumentAtomic(vaultRoot: string, requestPath: string, content: string): Promise<void> {
-  const { relativePath, absolutePath } = resolveSafePath(vaultRoot, requestPath);
+  const { absolutePath } = resolveSafePath(vaultRoot, requestPath);
   const dir = path.dirname(absolutePath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });

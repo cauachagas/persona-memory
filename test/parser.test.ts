@@ -1,8 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseDocument, normalizeVerified, determineTrust } from "../src/vault/parser.js";
-import { validateDocumentCompliance } from "../src/domain/document.js";
-import { parseActor, isHuman } from "../src/domain/actor.js";
+import { parseDocument, normalizeVerified, determineTrust, validateDocument } from "../src/parser.js";
 
 test("parser: parses valid OKF document with persona profile frontmatter", () => {
   const content = `---
@@ -29,49 +27,28 @@ persona:
 This is a test content.
 `;
 
-  const doc = parseDocument("beliefs/test.md", content);
-  assert.equal(doc.path, "beliefs/test.md");
+  const doc = parseDocument("/beliefs/test.md", content);
+  assert.equal(doc.path, "/beliefs/test.md");
   assert.equal(doc.type, "belief");
   assert.equal(doc.title, "Test Belief");
   assert.equal(doc.status, "stable");
   assert.deepEqual(doc.tags, ["architecture", "test"]);
-  assert.equal(doc.trust, "human-reviewed");
+  assert.equal(doc.trust, "human-verified");
   assert.equal(doc.persona?.state, "current");
   assert.match(doc.content, /This is a test content/);
 
-  const validation = validateDocumentCompliance(doc);
-  assert.equal(validation.valid, true);
-  assert.equal(validation.errors.length, 0);
+  const issues = validateDocument(doc);
+  assert.equal(issues.filter((i) => i.severity === "ERROR").length, 0);
 });
 
-test("parser: validates actor provenance and human check", () => {
-  const human = parseActor("human:caua");
-  assert.equal(human.type, "human");
-  assert.equal(human.identifier, "caua");
-  assert.equal(isHuman("human:caua"), true);
+test("parser: flags error on missing type and warning on unknown state", () => {
+  const missingType = parseDocument("/beliefs/missing.md", `---\ntitle: Missing Type\n---\nBody`);
+  const missingIssues = validateDocument(missingType);
+  assert.ok(missingIssues.some((i) => i.severity === "ERROR" && i.message.includes("missing required 'type'")));
 
-  const agent = parseActor("antigravity/gemini-3-pro");
-  assert.equal(agent.type, "agent");
-  assert.equal(isHuman("antigravity/gemini-3-pro"), false);
-
-  const processActor = parseActor("process:persona-memory");
-  assert.equal(processActor.type, "process");
-  assert.equal(isHuman("process:persona-memory"), false);
-});
-
-test("parser: validates invalid persona state for belief", () => {
-  const content = `---
-type: belief
-title: Invalid State
-persona:
-  state: active-frontier
----
-Body
-`;
-  const doc = parseDocument("beliefs/invalid.md", content);
-  const validation = validateDocumentCompliance(doc);
-  assert.equal(validation.valid, false);
-  assert.match(validation.errors[0], /Invalid persona.state/);
+  const badState = parseDocument("/beliefs/bad-state.md", `---\ntype: belief\ntitle: Bad\npersona:\n  state: active-frontier\n---\nBody`);
+  const stateIssues = validateDocument(badState);
+  assert.ok(stateIssues.some((i) => i.severity === "WARNING" && i.message.includes("Unexpected persona.state")));
 });
 
 test("parser: normalizes verified single mapping vs list", () => {
@@ -83,5 +60,12 @@ test("parser: normalizes verified single mapping vs list", () => {
     { by: "human:caua", at: "2026-09-22" },
   ]);
   assert.equal(list.length, 2);
-  assert.equal(determineTrust(list), "human-reviewed");
+  assert.equal(determineTrust({ verified: list, sources: [] }), "human-verified");
+
+  const agentOnly = determineTrust({
+    verified: [],
+    generated: { by: "antigravity/gemini-3-pro", at: "2026-09-22" },
+    sources: [],
+  });
+  assert.equal(agentOnly, "agent-generated");
 });

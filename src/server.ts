@@ -2,14 +2,66 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { getConfig } from "./config.js";
-import { getPersonaContext } from "./tools/context.js";
-import { searchTrajectory } from "./tools/search.js";
-import { handleGetMemory } from "./tools/memory.js";
-import { handleRecordCognitiveEvent } from "./tools/event.js";
-import { handleRecordEvidence } from "./tools/evidence.js";
+import { loadAllDocuments, readDocument } from "./vault.js";
+import { searchMemory } from "./search.js";
+import { recordCognitiveEvent } from "./mutations.js";
 
-export function createPersonaServer(vaultArg?: string): McpServer {
-  const config = getConfig(vaultArg);
+export function getPersonaContext(
+  vaultRoot: string,
+  options: { scope?: string[]; include_history?: boolean; max_results?: number; max_chars?: number } = {}
+): string {
+  const { scope = ["heuristics", "beliefs", "competencies"], include_history = false, max_chars = 4000 } = options;
+  const docs = loadAllDocuments(vaultRoot);
+
+  const lines: string[] = ["# Persona Context Briefing\n"];
+
+  if (scope.includes("heuristics")) {
+    lines.push("## Heuristics");
+    for (const d of docs.filter((d) => d.type === "heuristic")) {
+      if (!include_history && d.persona?.state === "superseded") continue;
+      lines.push("* " + d.title + ": " + d.description + " [trust: " + d.trust + "]");
+    }
+    lines.push("");
+  }
+
+  if (scope.includes("beliefs")) {
+    lines.push("## Architectural Beliefs");
+    for (const d of docs.filter((d) => d.type === "belief")) {
+      if (!include_history && d.persona?.state === "superseded") continue;
+      lines.push("* " + d.title + ": " + d.description + " [trust: " + d.trust + "]");
+    }
+    lines.push("");
+  }
+
+  if (scope.includes("competencies")) {
+    lines.push("## Competencies & Active Frontiers");
+    for (const d of docs.filter((d) => d.type === "competency")) {
+      const state = d.persona?.state || "consolidated";
+      lines.push("* " + d.title + " (" + state + "): " + d.description);
+    }
+    lines.push("");
+  }
+
+  if (include_history) {
+    const events = docs.filter((d) => d.type === "cognitive_event");
+    if (events.length > 0) {
+      lines.push("## Recent Cognitive Events");
+      for (const e of events.slice(0, 5)) {
+        lines.push("* " + e.title + " (" + (e.persona?.state || e.status) + "): " + e.description);
+      }
+      lines.push("");
+    }
+  }
+
+  let output = lines.join("\n").trim();
+  if (output.length > max_chars) {
+    output = output.slice(0, max_chars) + "\n... [truncated to context budget]";
+  }
+  return output;
+}
+
+export function createPersonaServer(vaultArg?: string, producerArg?: string): McpServer {
+  const config = getConfig(vaultArg, producerArg);
 
   const server = new McpServer({
     name: "persona-memory",
@@ -19,16 +71,18 @@ export function createPersonaServer(vaultArg?: string): McpServer {
   // Tool 1: get_persona_context
   server.tool(
     "get_persona_context",
-    "Retorna o bootstrap de contexto compacto da sessão com a identidade, heurísticas ativas, convicções arquiteturais atuais, fronteiras de aprendizado e restrições.",
+    "Fornece ao agente um briefing compacto da persona (heurísticas, crenças arquiteturais vigentes, fronteiras de competência e restrições). Respeita o orçamento de contexto.",
     {
-      scope: z.string().optional().describe("Escopo do contexto (default: 'default')"),
-      include_history: z.boolean().optional().describe("Se verdadeiro, inclui crenças superseded e eventos cognitivos aceitos"),
+      scope: z.array(z.string()).optional().describe("Escopos a incluir: heuristics, beliefs, competencies (default todos)"),
+      include_history: z.boolean().optional().describe("Se verdadeiro, inclui crenças superseded e eventos em rascunho"),
+      max_results: z.number().optional().describe("Quantidade máxima de itens por seção (default 20)"),
+      max_chars: z.number().optional().describe("Teto máximo de caracteres do briefing (default 4000)"),
     },
-    async ({ scope, include_history }) => {
+    async (params) => {
       try {
-        const context = getPersonaContext(config.vaultPath, { scope, include_history });
+        const text = getPersonaContext(config.vaultPath, params);
         return {
-          content: [{ type: "text", text: JSON.stringify(context, null, 2) }],
+          content: [{ type: "text", text }],
         };
       } catch (err: any) {
         return {
@@ -39,27 +93,27 @@ export function createPersonaServer(vaultArg?: string): McpServer {
     }
   );
 
-  // Tool 2: search_trajectory
+  // Tool 2: search_memory
   server.tool(
-    "search_trajectory",
-    "Executa busca léxica, filtragem por metadados e expansão de grafo (1-hop) respeitando o orçamento de contexto (Context Budget).",
+    "search_memory",
+    "Descobre conceitos, heurísticas, crenças, projetos e eventos na memória por busca léxica ponderada e expansão de grafo (1-hop). Retorna metadados e snippets curtos sem descarregar o documento completo.",
     {
-      query: z.string().describe("Termo ou palavras-chave de busca na trajetória"),
-      types: z.array(z.string()).optional().describe("Filtrar por tipos específicos (ex: belief, project, event, competency, heuristic)"),
+      query: z.string().describe("Termo ou palavras-chave de busca na memória"),
+      types: z.array(z.string()).optional().describe("Filtrar por tipos: heuristic, belief, competency, project, cognitive_event, evidence"),
       limit: z.number().optional().describe("Quantidade máxima de resultados (default 5)"),
-      max_chars: z.number().optional().describe("Orçamento máximo de caracteres retornados (default 8000)"),
-      expand_graph: z.boolean().optional().describe("Expandir resultados conectados no grafo por 1-hop (default true)"),
+      expand_graph: z.boolean().optional().describe("Expandir documentos conectados por 1 hop de link (default true)"),
+      max_chars: z.number().optional().describe("Orçamento de contexto para os resultados (default 8000)"),
     },
-    async ({ query, types, limit, max_chars, expand_graph }) => {
+    async (params) => {
       try {
-        const output = searchTrajectory(config.vaultPath, query, { types, limit, max_chars, expand_graph });
+        const output = searchMemory(config.vaultPath, params.query, params);
         return {
           content: [{ type: "text", text: JSON.stringify(output, null, 2) }],
         };
       } catch (err: any) {
         return {
           isError: true,
-          content: [{ type: "text", text: "Error in search_trajectory: " + err.message }],
+          content: [{ type: "text", text: "Error in search_memory: " + err.message }],
         };
       }
     }
@@ -68,15 +122,30 @@ export function createPersonaServer(vaultArg?: string): McpServer {
   // Tool 3: get_memory
   server.tool(
     "get_memory",
-    "Retorna o conteúdo integral e o frontmatter de um documento específico no cofre.",
+    "Recupera a fonte integral e o frontmatter de um documento específico localizado via search_memory. Confinado estritamente à fronteira física do cofre.",
     {
-      path: z.string().describe("Caminho relativo do documento dentro do cofre (ex: beliefs/modular-monolith.md)"),
+      path: z.string().describe("Caminho bundle-relative do documento no cofre (ex: /beliefs/modular-monolith.md)"),
     },
     async ({ path: requestPath }) => {
       try {
-        const memory = handleGetMemory(config.vaultPath, requestPath);
+        const doc = readDocument(config.vaultPath, requestPath);
         return {
-          content: [{ type: "text", text: JSON.stringify(memory, null, 2) }],
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  path: doc.path,
+                  type: doc.type,
+                  title: doc.title,
+                  frontmatter: doc.frontmatter,
+                  content: doc.content,
+                },
+                null,
+                2
+              ),
+            },
+          ],
         };
       } catch (err: any) {
         return {
@@ -90,19 +159,22 @@ export function createPersonaServer(vaultArg?: string): McpServer {
   // Tool 4: record_cognitive_event
   server.tool(
     "record_cognitive_event",
-    "Registra um evento cognitivo (aprendizado, mudança de entendimento ou evidência). O documento é criado como status: draft e persona.state: draft com commit no Git, sem modificar crenças estáveis sem ratificação humana.",
+    "Registra um evento cognitivo na trajetória (acontecimento, aprendizado, revisão de crença ou observação). O evento é gravado como status: draft e commitado no Git, sem jamais alterar crenças vigentes de forma automática.",
     {
-      title: z.string().describe("Título do evento cognitivo"),
-      event_kind: z.string().describe("Tipo de evento: belief_change, learning, milestone, evidence, observation"),
-      summary: z.string().describe("Resumo curto da observação"),
-      details: z.string().describe("Detalhes analíticos completos, observações e evidências"),
-      related_paths: z.array(z.string()).optional().describe("Caminhos de documentos relacionados (ex: beliefs/modular-monolith.md)"),
-      target: z.string().optional().describe("Caminho do documento que este evento propõe atualizar"),
-      proposed_state: z.string().optional().describe("Estado proposto para o target (ex: current, superseded)"),
+      title: z.string().describe("Título curto e descritivo do evento"),
+      description: z.string().describe("Descrição em uma frase para o índice e metadados"),
+      event_kind: z.string().describe("Tipo de evento: belief_change, belief_challenge, competency_milestone, project_lesson, learning_observation"),
+      summary: z.string().describe("Resumo contextual do que ocorreu"),
+      details: z.string().describe("Detalhes completos, análise, observações e conclusões"),
+      target: z.string().optional().describe("Caminho bundle-relative do documento alvo (obrigatório para belief_change/challenge, milestone, lesson)"),
+      related_paths: z.array(z.string()).optional().describe("Caminhos bundle-relative de documentos relacionados"),
     },
     async (input) => {
       try {
-        const result = await handleRecordCognitiveEvent(config.vaultPath, input);
+        const result = await recordCognitiveEvent(config.vaultPath, {
+          ...input,
+          producer: config.producer,
+        });
         return {
           content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
         };
@@ -115,39 +187,15 @@ export function createPersonaServer(vaultArg?: string): McpServer {
     }
   );
 
-  // Tool 5: record_evidence
-  server.tool(
-    "record_evidence",
-    "Registra explicitamente um trecho ou artefato de evidência (logs selecionados, diffs, benchmarks). Aplica redaction automático de segredos e limite de 100KB.",
-    {
-      title: z.string().describe("Título da evidência"),
-      content: z.string().describe("Conteúdo textual ou trecho selecionado da evidência"),
-      context: z.string().optional().describe("Contexto ou objetivo da captura desta evidência"),
-      related_paths: z.array(z.string()).optional().describe("Documentos relacionados a esta evidência"),
-    },
-    async (input) => {
-      try {
-        const result = await handleRecordEvidence(config.vaultPath, input);
-        return {
-          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
-        };
-      } catch (err: any) {
-        return {
-          isError: true,
-          content: [{ type: "text", text: "Error in record_evidence: " + err.message }],
-        };
-      }
-    }
-  );
-
   return server;
 }
 
-export async function runServer(vaultArg?: string): Promise<void> {
-  const config = getConfig(vaultArg);
-  console.error("[persona-memory] Starting MCP server for vault:", config.vaultPath);
+export async function runServer(vaultArg?: string, producerArg?: string): Promise<void> {
+  const config = getConfig(vaultArg, producerArg);
+  console.error("[persona-memory] Starting MCP stdio server for vault:", config.vaultPath);
+  console.error("[persona-memory] Configured producer:", config.producer);
 
-  const server = createPersonaServer(vaultArg);
+  const server = createPersonaServer(vaultArg, producerArg);
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("[persona-memory] MCP server connected via stdio transport.");

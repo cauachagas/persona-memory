@@ -14,8 +14,11 @@ export async function isGitRepo(vaultRoot: string): Promise<boolean> {
 
 export async function isWorktreeClean(vaultRoot: string): Promise<boolean> {
   try {
+    // Check for staged changes
     await execFileAsync("git", ["diff", "--cached", "--quiet"], { cwd: vaultRoot });
-    return true;
+    // Check for unstaged changes
+    const { stdout } = await execFileAsync("git", ["status", "--porcelain"], { cwd: vaultRoot });
+    return stdout.trim().length === 0;
   } catch {
     return false;
   }
@@ -24,6 +27,13 @@ export async function isWorktreeClean(vaultRoot: string): Promise<boolean> {
 export async function addFiles(vaultRoot: string, filePaths: string[]): Promise<void> {
   if (filePaths.length === 0) return;
   await execFileAsync("git", ["add", "--", ...filePaths], { cwd: vaultRoot });
+}
+
+export async function resetFiles(vaultRoot: string, filePaths: string[]): Promise<void> {
+  if (filePaths.length === 0) return;
+  try {
+    await execFileAsync("git", ["reset", "HEAD", "--", ...filePaths], { cwd: vaultRoot });
+  } catch {}
 }
 
 export async function commit(vaultRoot: string, message: string): Promise<string> {

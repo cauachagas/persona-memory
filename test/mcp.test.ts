@@ -2,27 +2,29 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 import os from "node:os";
-import { getPersonaContext } from "../src/tools/context.js";
-import { searchTrajectory } from "../src/tools/search.js";
-import { handleGetMemory } from "../src/tools/memory.js";
+import { getPersonaContext } from "../src/server.js";
+import { searchMemory } from "../src/search.js";
+import { readDocument } from "../src/vault.js";
 
 const realVault = path.join(os.homedir(), ".persona-memory");
 
-test("mcp tools: get_persona_context returns bootstrap metadata with constraints", () => {
-  const ctx = getPersonaContext(realVault);
-  assert.equal(ctx.identity.name, "Cauã");
-  assert.ok(ctx.heuristics.length >= 1);
-  assert.ok(ctx.active_frontiers.length >= 1);
-  assert.ok(ctx.current_beliefs.length >= 1);
-  assert.ok(ctx.relevant_constraints.length >= 1);
+test("mcp: get_persona_context returns briefing and respects context budget", () => {
+  const context = getPersonaContext(realVault, { max_chars: 4000 });
+  assert.ok(context.includes("Persona Context Briefing"));
+  assert.ok(context.includes("Learning Style"));
+  assert.ok(context.includes("Monólito Modular"));
+  assert.ok(context.includes("WebAssembly Memory"));
+  assert.ok(context.length <= 4000);
 });
 
-test("mcp tools: search_trajectory supports context budget", () => {
-  const { results, totalChars } = searchTrajectory(realVault, "WebAssembly", { max_chars: 2000 });
+test("mcp: search_memory and readDocument work end-to-end", () => {
+  const { results, totalChars } = searchMemory(realVault, "WebAssembly", { limit: 3 });
   assert.ok(results.length >= 1);
-  assert.ok(totalChars <= 2000);
+  assert.equal(results[0].path, "/competencies/webassembly.md");
+  assert.equal(results[0].trust, "human-verified");
+  assert.ok(totalChars > 0);
 
-  const wasmDoc = handleGetMemory(realVault, "competencies/webassembly.md");
-  assert.equal(wasmDoc.path, "competencies/webassembly.md");
-  assert.equal(wasmDoc.frontmatter.type, "competency");
+  const doc = readDocument(realVault, "/competencies/webassembly.md");
+  assert.equal(doc.title, "WebAssembly Memory");
+  assert.match(doc.content, /memória linear/i);
 });

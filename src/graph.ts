@@ -1,5 +1,5 @@
 import path from "node:path";
-import { OKFDocument } from "../domain/document.js";
+import { OKFDocument } from "./parser.js";
 
 export interface GraphIndex {
   forwardLinks: Map<string, string[]>;
@@ -10,7 +10,7 @@ export interface GraphIndex {
 export function extractLinksFromContent(content: string, sourcePath: string): string[] {
   const links: string[] = [];
 
-  // Standard Markdown links: [Text](target)
+  // 1. Standard Markdown links: [Text](target)
   const mdLinkRegex = /\[[^\]]+\]\(([^)]+)\)/g;
   let match: RegExpExecArray | null;
   while ((match = mdLinkRegex.exec(content)) !== null) {
@@ -23,7 +23,7 @@ export function extractLinksFromContent(content: string, sourcePath: string): st
     }
   }
 
-  // Obsidian wiki links: [[target]] or [[target|label]] or [[target#heading]]
+  // 2. Obsidian wiki links: [[target]] or [[target|label]] or [[target#heading]]
   const wikiLinkRegex = /\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]/g;
   while ((match = wikiLinkRegex.exec(content)) !== null) {
     let rawTarget = match[1].trim();
@@ -43,20 +43,12 @@ export function resolveLinkTarget(sourcePath: string, rawTarget: string): string
   const cleanTarget = rawTarget.split("#")[0].split("?")[0].trim();
   if (!cleanTarget) return null;
 
-  if (cleanTarget.startsWith("/")) {
-    return path.normalize(cleanTarget.slice(1)).replace(/\\/g, "/");
+  let normalized = cleanTarget.startsWith("/") ? cleanTarget : "/" + cleanTarget;
+  if (!normalized.endsWith(".md")) {
+    normalized += ".md";
   }
 
-  if (cleanTarget.startsWith(".")) {
-    const sourceDir = path.dirname(sourcePath);
-    const resolved = path.normalize(path.join(sourceDir, cleanTarget)).replace(/\\/g, "/");
-    if (resolved.startsWith("..")) {
-      return null;
-    }
-    return resolved;
-  }
-
-  return path.normalize(cleanTarget).replace(/\\/g, "/");
+  return normalized.replace(/\\/g, "/");
 }
 
 export function buildGraph(documents: OKFDocument[]): GraphIndex {

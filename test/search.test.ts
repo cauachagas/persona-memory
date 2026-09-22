@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { searchTrajectory } from "../src/tools/search.js";
+import { searchMemory } from "../src/search.js";
 
 test("search: respects context budget max_chars and ranking", () => {
   const tempVault = fs.mkdtempSync(path.join(os.tmpdir(), "persona-search-test-"));
@@ -45,8 +45,7 @@ Gerenciamento de buffers de memória linear no WASM.
     "utf8"
   );
 
-  // Search with budget limit
-  const { results, totalChars } = searchTrajectory(tempVault, "Monólito", { max_chars: 500 });
+  const { results, totalChars } = searchMemory(tempVault, "Monólito", { max_chars: 500 });
   assert.ok(results.length >= 1);
   assert.equal(results[0].title, "Monólito Modular");
   assert.ok(totalChars <= 500);

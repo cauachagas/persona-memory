@@ -1,23 +1,23 @@
-import { OKFDocument } from "../domain/document.js";
-import { loadAllDocuments } from "../vault/reader.js";
-import { buildGraph, expandOneHop } from "../vault/graph.js";
+import { OKFDocument } from "./parser.js";
+import { loadAllDocuments } from "./vault.js";
+import { buildGraph, expandOneHop } from "./graph.js";
 
 export interface SearchResult {
   path: string;
   type: string;
   title: string;
-  status: string;
-  trust: "human-reviewed" | "machine-confirmed" | "unverified";
+  description: string;
+  score: number;
   matched_by: string[];
   snippet: string;
-  score: number;
+  trust: "human-verified" | "source-backed" | "agent-generated" | "unverified";
 }
 
-export interface SearchTrajectoryOptions {
+export interface SearchMemoryOptions {
   types?: string[];
   limit?: number;
-  max_chars?: number;
   expand_graph?: boolean;
+  max_chars?: number;
 }
 
 export function extractSnippet(content: string, queryTokens: string[], maxLength = 200): string {
@@ -44,12 +44,12 @@ export function extractSnippet(content: string, queryTokens: string[], maxLength
   return snippet;
 }
 
-export function searchTrajectory(
+export function searchMemory(
   vaultRoot: string,
   query: string,
-  options: SearchTrajectoryOptions = {}
+  options: SearchMemoryOptions = {}
 ): { results: SearchResult[]; totalChars: number } {
-  const { types, limit = 5, max_chars = 8000, expand_graph = true } = options;
+  const { types, limit = 5, expand_graph = true, max_chars = 8000 } = options;
   const cleanQuery = query.trim().toLowerCase();
   if (!cleanQuery) return { results: [], totalChars: 0 };
 
@@ -75,19 +75,19 @@ export function searchTrajectory(
     // 1. Exact title match
     if (lowerTitle === cleanQuery) {
       docScore += 100;
-      matchedBy.add("exact_title");
+      matchedBy.add("title");
     } else if (tokens.every((t) => lowerTitle.includes(t))) {
       docScore += 60;
       matchedBy.add("title");
     } else if (tokens.some((t) => lowerTitle.includes(t))) {
       docScore += 30;
-      matchedBy.add("title_partial");
+      matchedBy.add("title");
     }
 
     // 2. Tag match
     if (lowerTags.includes(cleanQuery)) {
       docScore += 80;
-      matchedBy.add("exact_tag");
+      matchedBy.add("tag");
     } else if (tokens.some((t) => lowerTags.some((tag) => tag.includes(t)))) {
       docScore += 40;
       matchedBy.add("tag");
@@ -99,13 +99,7 @@ export function searchTrajectory(
       matchedBy.add("description");
     }
 
-    // 4. Type match
-    if (doc.type.toLowerCase().includes(cleanQuery)) {
-      docScore += 25;
-      matchedBy.add("type");
-    }
-
-    // 5. Body match
+    // 4. Body match
     if (tokens.some((t) => lowerContent.includes(t))) {
       const matchCount = tokens.filter((t) => lowerContent.includes(t)).length;
       docScore += 15 * matchCount;
@@ -135,7 +129,7 @@ export function searchTrajectory(
           }
           scores.set(expPath, {
             score: 15,
-            matchedBy: new Set(["graph_connected"]),
+            matchedBy: new Set(["linked_documents"]),
             doc: expDoc,
           });
         }
@@ -152,10 +146,10 @@ export function searchTrajectory(
     if (finalResults.length >= limit) break;
 
     const snippet = extractSnippet(doc.content, tokens);
-    const itemChars = doc.path.length + doc.title.length + snippet.length + 100;
+    const itemChars = doc.path.length + doc.title.length + doc.description.length + snippet.length + 80;
 
     if (accumulatedChars + itemChars > max_chars && finalResults.length > 0) {
-      break; // respect context budget
+      break;
     }
 
     accumulatedChars += itemChars;
@@ -163,11 +157,11 @@ export function searchTrajectory(
       path: doc.path,
       type: doc.type,
       title: doc.title,
-      status: doc.status,
-      trust: doc.trust,
+      description: doc.description,
+      score: Number((score / 100).toFixed(2)),
       matched_by: Array.from(matchedBy),
       snippet,
-      score,
+      trust: doc.trust,
     });
   }
 
