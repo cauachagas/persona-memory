@@ -1,7 +1,7 @@
 # Plano de Testes Manuais — persona-memory v0.1
 
 > Validação ponta a ponta do ciclo de trajetória entre harnesses (§40 da spec).
-> Estado em 2026-09-22: Testes 0–5 ✅ executados com sucesso.
+> Estado em 2026-09-22: Testes 0–5.1 ✅ executados com sucesso.
 
 ## Pré-requisitos
 
@@ -58,12 +58,40 @@ Exercita o desacoplamento do storage: o humano edita o Markdown diretamente no O
 
 Exercita a regra de ouro: *evento registra trajetória, humano consolida/promove estado* (§27/§28).
 
+Pergunta conceitual: *"O humano consegue consolidar um novo estado persistente?"*
+
 1. Editar `beliefs/modular-monolith.md` no Obsidian adicionando regra estrita: veto a microsserviços e limite de escala para 50 engenheiros.
 2. Rodar `persona-memory validate` e `persona-memory index`.
 3. Commitar a alteração via Git: `git -C ~/.persona-memory commit -m "feat(belief): consolidar regra dos 50 engenheiros..."`.
 4. Em harness novo, perguntar:
    > *"Qual é minha posição e regras atuais sobre arquitetura modular e microsserviços? Use search_memory e get_memory."*
-5. **Resultado observado:** O agente recuperou com precisão cirúrgica a postura estrita, as duas regras claras (< 50 engenheiros e exceção única de compliance/GPU), a motivação e a referência com status estável (`trust: human-verified`).
+5. **Resultado observado:** O agente recuperou com precisão cirúrgica a postura estrita, as duas regras claras (< 50 engenheiros e exceção única de compliance/GPU), a motivação e a referência com status estável (`status: stable`).
+
+## Teste 5.1 — Recuperação de Trust e Proveniência do Belief ✅
+
+Continuação do Teste 5. Exercita a distinção entre **estado consolidado** (`status: stable`), **nível de confiança** (`trust: human-verified`) e **proveniência** (`generated.by` / `verified.by`).
+
+Pergunta conceitual: *"O sistema preserva a confiança e proveniência desse estado?"*
+
+1. Utilizar o mesmo `beliefs/modular-monolith.md` consolidado no Teste 5.
+2. Em um harness novo, perguntar:
+   > *"Qual é a minha posição e regras atuais sobre arquitetura modular e microsserviços? Informe também o `trust` e a proveniência do documento utilizado. Use as tools `search_memory` e `get_memory` do servidor `persona-memory`."*
+3. **Resultado observado:** O agente recuperou:
+
+```text
+Documento: /beliefs/modular-monolith.md
+Status: stable
+Trust: human-verified
+Gerado por: human:caua
+Verificado por: human:caua
+```
+
+Além disso, recuperou a regra dos **50 engenheiros**, a exceção de compliance/hardware e a fonte relacionada:
+```text
+/projects/antigravity-projects.md
+```
+
+**Critério de sucesso:** O agente deve recuperar o belief correto, reproduzir a regra dos **50 engenheiros** e identificar explicitamente `trust: human-verified`, juntamente com a proveniência humana (`human:caua`).
 
 ## Conclusão Arquitetural Validada
 
@@ -96,3 +124,18 @@ Exercita a regra de ouro: *evento registra trajetória, humano consolida/promove
 3. **Git** é a memória temporal auditável.
 4. **Obsidian** é a interface humana para inspeção, edição e promoção de crenças.
 5. **Core** assegura integridade de schema, links e indexação.
+
+### Dimensões Validadas na Memória Consolidada
+
+```text
+Teste 5: Estado Consolidado
+    "O humano consegue consolidar e alterar um novo estado no Obsidian?"
+                    ↓
+       Convicção e regras recuperadas com precisão
+
+Teste 5.1: Confiança e Proveniência
+    "O sistema preserva a rastreabilidade e confiança do estado?"
+                    ↓
+       trust (human-verified) + atores (human:caua) + status (stable)
+```
+
