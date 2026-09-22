@@ -1,0 +1,37 @@
+{
+  "name": "persona-memory",
+  "version": "0.1.0",
+  "description": "Agnostic Cognitive Trajectory & Developer Persona Engine for Coding Agents (OKF v0.2 + Obsidian + MCP)",
+  "type": "module",
+  "main": "dist/src/index.js",
+  "bin": {
+    "persona-memory": "dist/src/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "test": "node --test dist/test/*.test.js",
+    "pretest": "tsc",
+    "start": "node dist/src/cli.js"
+  },
+  "keywords": [
+    "okf",
+    "mcp",
+    "obsidian",
+    "persona",
+    "cognitive-trajectory",
+    "memory"
+  ],
+  "author": "Cauã Chagas",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/server": "^2.0.0",
+    "gray-matter": "^4.0.3",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.8.0"
+  }
+}
