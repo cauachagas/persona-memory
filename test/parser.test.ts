@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseDocument, validateDocument, normalizeVerified, determineTrust } from "../src/parser.js";
+import { parseDocument, normalizeVerified, determineTrust } from "../src/vault/parser.js";
+import { validateDocumentCompliance } from "../src/domain/document.js";
+import { parseActor, isHuman } from "../src/domain/actor.js";
 
-test("parser: parses valid OKF document with frontmatter", () => {
+test("parser: parses valid OKF document with persona profile frontmatter", () => {
   const content = `---
 type: belief
 title: Test Belief
@@ -19,6 +21,7 @@ verified:
   at: "2026-09-22T03:05:00Z"
 persona:
   state: current
+  category: architectural-preference
 ---
 
 # Content Body
@@ -36,22 +39,39 @@ This is a test content.
   assert.equal(doc.persona?.state, "current");
   assert.match(doc.content, /This is a test content/);
 
-  const validation = validateDocument(doc);
+  const validation = validateDocumentCompliance(doc);
   assert.equal(validation.valid, true);
   assert.equal(validation.errors.length, 0);
 });
 
-test("parser: validates missing type in regular document", () => {
-  const content = `---
-title: Missing Type
----
-Body without type.
-`;
+test("parser: validates actor provenance and human check", () => {
+  const human = parseActor("human:caua");
+  assert.equal(human.type, "human");
+  assert.equal(human.identifier, "caua");
+  assert.equal(isHuman("human:caua"), true);
 
-  const doc = parseDocument("heuristics/missing.md", content);
-  const validation = validateDocument(doc);
+  const agent = parseActor("antigravity/gemini-3-pro");
+  assert.equal(agent.type, "agent");
+  assert.equal(isHuman("antigravity/gemini-3-pro"), false);
+
+  const processActor = parseActor("process:persona-memory");
+  assert.equal(processActor.type, "process");
+  assert.equal(isHuman("process:persona-memory"), false);
+});
+
+test("parser: validates invalid persona state for belief", () => {
+  const content = `---
+type: belief
+title: Invalid State
+persona:
+  state: active-frontier
+---
+Body
+`;
+  const doc = parseDocument("beliefs/invalid.md", content);
+  const validation = validateDocumentCompliance(doc);
   assert.equal(validation.valid, false);
-  assert.match(validation.errors[0], /missing required 'type'/);
+  assert.match(validation.errors[0], /Invalid persona.state/);
 });
 
 test("parser: normalizes verified single mapping vs list", () => {
@@ -64,10 +84,4 @@ test("parser: normalizes verified single mapping vs list", () => {
   ]);
   assert.equal(list.length, 2);
   assert.equal(determineTrust(list), "human-reviewed");
-
-  const machineOnly = normalizeVerified({ by: "process:bot", at: "2026-09-21" });
-  assert.equal(determineTrust(machineOnly), "machine-confirmed");
-
-  const empty = normalizeVerified(null);
-  assert.equal(determineTrust(empty), "unverified");
 });

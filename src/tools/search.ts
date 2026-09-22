@@ -1,5 +1,6 @@
-import { OKFDocument } from "./parser.js";
-import { buildGraph, expandOneHop } from "./graph.js";
+import { OKFDocument } from "../domain/document.js";
+import { loadAllDocuments } from "../vault/reader.js";
+import { buildGraph, expandOneHop } from "../vault/graph.js";
 
 export interface SearchResult {
   path: string;
@@ -12,9 +13,10 @@ export interface SearchResult {
   score: number;
 }
 
-export interface SearchOptions {
+export interface SearchTrajectoryOptions {
   types?: string[];
   limit?: number;
+  max_chars?: number;
   expand_graph?: boolean;
 }
 
@@ -42,15 +44,16 @@ export function extractSnippet(content: string, queryTokens: string[], maxLength
   return snippet;
 }
 
-export function searchDocuments(
-  documents: OKFDocument[],
+export function searchTrajectory(
+  vaultRoot: string,
   query: string,
-  options: SearchOptions = {}
-): SearchResult[] {
-  const { types, limit = 5, expand_graph = true } = options;
+  options: SearchTrajectoryOptions = {}
+): { results: SearchResult[]; totalChars: number } {
+  const { types, limit = 5, max_chars = 8000, expand_graph = true } = options;
   const cleanQuery = query.trim().toLowerCase();
-  if (!cleanQuery) return [];
+  if (!cleanQuery) return { results: [], totalChars: 0 };
 
+  const documents = loadAllDocuments(vaultRoot);
   const tokens = cleanQuery.split(/\s+/).filter((t) => t.length > 0);
   const graph = buildGraph(documents);
 
@@ -114,7 +117,7 @@ export function searchDocuments(
     }
   }
 
-  // Graph expansion: 1-hop
+  // 1-Hop Graph expansion
   if (expand_graph && scores.size > 0) {
     const sortedSeeds = Array.from(scores.entries())
       .sort((a, b) => b[1].score - a[1].score)
@@ -140,19 +143,33 @@ export function searchDocuments(
     }
   }
 
-  const results: SearchResult[] = Array.from(scores.values())
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit)
-    .map(({ score, matchedBy, doc }) => ({
+  const sortedResults = Array.from(scores.values()).sort((a, b) => b.score - a.score);
+
+  const finalResults: SearchResult[] = [];
+  let accumulatedChars = 0;
+
+  for (const { score, matchedBy, doc } of sortedResults) {
+    if (finalResults.length >= limit) break;
+
+    const snippet = extractSnippet(doc.content, tokens);
+    const itemChars = doc.path.length + doc.title.length + snippet.length + 100;
+
+    if (accumulatedChars + itemChars > max_chars && finalResults.length > 0) {
+      break; // respect context budget
+    }
+
+    accumulatedChars += itemChars;
+    finalResults.push({
       path: doc.path,
       type: doc.type,
       title: doc.title,
       status: doc.status,
       trust: doc.trust,
       matched_by: Array.from(matchedBy),
-      snippet: extractSnippet(doc.content, tokens),
+      snippet,
       score,
-    }));
+    });
+  }
 
-  return results;
+  return { results: finalResults, totalChars: accumulatedChars };
 }

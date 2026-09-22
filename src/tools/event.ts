@@ -1,4 +1,4 @@
-import { recordCognitiveEvent, RecordCognitiveEventInput, RecordCognitiveEventResult } from "../mutations.js";
+import { recordCognitiveEvent, RecordCognitiveEventInput, RecordCognitiveEventResult } from "../mutations/event.js";
 
 export async function handleRecordCognitiveEvent(
   vaultRoot: string,

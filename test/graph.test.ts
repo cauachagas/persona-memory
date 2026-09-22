@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseDocument } from "../src/parser.js";
-import { buildGraph, expandOneHop } from "../src/graph.js";
+import { parseDocument } from "../src/vault/parser.js";
+import { buildGraph, expandOneHop } from "../src/vault/graph.js";
 
 test("graph: extracts markdown and wiki links, calculates backlinks and expands 1-hop", () => {
   const docA = parseDocument("projects/project-a.md", `---

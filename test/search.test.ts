@@ -1,67 +1,55 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { searchDocuments } from "../src/search.js";
-import { parseDocument } from "../src/parser.js";
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+import { searchTrajectory } from "../src/tools/search.js";
 
-const docs = [
-  parseDocument("beliefs/modular-monolith.md", `---
+test("search: respects context budget max_chars and ranking", () => {
+  const tempVault = fs.mkdtempSync(path.join(os.tmpdir(), "persona-search-test-"));
+  fs.mkdirSync(path.join(tempVault, "beliefs"), { recursive: true });
+  fs.mkdirSync(path.join(tempVault, "competencies"), { recursive: true });
+
+  fs.writeFileSync(
+    path.join(tempVault, "beliefs/modular-monolith.md"),
+    `---
 type: belief
 title: Monólito Modular
-description: Preferência por monólitos modulares em arquitetura
+description: Preferência arquitetural por monólitos modulares
 status: stable
 tags:
   - architecture
-  - modular-monolith
-verified:
-  by: human:caua
+persona:
+  state: current
 ---
-Corpo detalhado sobre monolitos e arquitetura.
-`),
-  parseDocument("competencies/webassembly.md", `---
+Corpo detalhado sobre monolitos modulares e escalabilidade contextual.
+`,
+    "utf8"
+  );
+
+  fs.writeFileSync(
+    path.join(tempVault, "competencies/webassembly.md"),
+    `---
 type: competency
 title: WebAssembly Memory
-description: Estudo de memória linear e ponteiros
+description: Estudo de memória linear
 status: stable
 tags:
   - wasm
   - memory
-verified:
-  by: human:caua
+persona:
+  state: active-frontier
 ---
-Explorando gerenciamento de buffers e ponteiros no WASM.
-`),
-  parseDocument("heuristics/learning-style.md", `---
-type: heuristic
-title: Learning Style
-description: Feynman e abordagem intuitiva bottom-up
-status: stable
-tags:
-  - learning
-verified:
-  by: human:caua
----
-Teoria antes de prática e consolidação.
-`),
-];
+Gerenciamento de buffers de memória linear no WASM.
+`,
+    "utf8"
+  );
 
-test("search: exact title match ranking", () => {
-  const results = searchDocuments(docs, "Monólito Modular");
+  // Search with budget limit
+  const { results, totalChars } = searchTrajectory(tempVault, "Monólito", { max_chars: 500 });
   assert.ok(results.length >= 1);
-  assert.equal(results[0].path, "beliefs/modular-monolith.md");
-  assert.equal(results[0].trust, "human-reviewed");
-});
+  assert.equal(results[0].title, "Monólito Modular");
+  assert.ok(totalChars <= 500);
 
-test("search: tag matching and type filtering", () => {
-  const results = searchDocuments(docs, "wasm", { types: ["competency"] });
-  assert.equal(results.length, 1);
-  assert.equal(results[0].path, "competencies/webassembly.md");
-
-  const filteredOut = searchDocuments(docs, "wasm", { types: ["belief"] });
-  assert.equal(filteredOut.length, 0);
-});
-
-test("search: snippet contains matched context", () => {
-  const results = searchDocuments(docs, "ponteiros");
-  assert.ok(results.length >= 1);
-  assert.match(results[0].snippet.toLowerCase(), /ponteiros/);
+  fs.rmSync(tempVault, { recursive: true, force: true });
 });

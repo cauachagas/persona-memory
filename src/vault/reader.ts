@@ -1,13 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
-import { parseDocument, OKFDocument } from "./parser.js";
+import { parseDocument } from "./parser.js";
+import { OKFDocument } from "../domain/document.js";
 
 const RECOGNIZED_DIRS = [
   "heuristics",
   "beliefs",
   "competencies",
   "projects",
-  "goals",
   "events",
   "evidence",
 ];

@@ -14,11 +14,10 @@ export async function isGitRepo(vaultRoot: string): Promise<boolean> {
 
 export async function isWorktreeClean(vaultRoot: string): Promise<boolean> {
   try {
-    // Check if staged changes exist
     await execFileAsync("git", ["diff", "--cached", "--quiet"], { cwd: vaultRoot });
     return true;
   } catch {
-    return false; // Non-zero exit code means staged changes exist
+    return false;
   }
 }
 

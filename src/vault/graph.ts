@@ -1,5 +1,5 @@
 import path from "node:path";
-import { OKFDocument } from "./parser.js";
+import { OKFDocument } from "../domain/document.js";
 
 export interface GraphIndex {
   forwardLinks: Map<string, string[]>;
@@ -10,7 +10,7 @@ export interface GraphIndex {
 export function extractLinksFromContent(content: string, sourcePath: string): string[] {
   const links: string[] = [];
 
-  // 1. Standard Markdown links: [Text](target)
+  // Standard Markdown links: [Text](target)
   const mdLinkRegex = /\[[^\]]+\]\(([^)]+)\)/g;
   let match: RegExpExecArray | null;
   while ((match = mdLinkRegex.exec(content)) !== null) {
@@ -23,7 +23,7 @@ export function extractLinksFromContent(content: string, sourcePath: string): st
     }
   }
 
-  // 2. Obsidian wiki links: [[target]] or [[target|label]] or [[target#heading]]
+  // Obsidian wiki links: [[target]] or [[target|label]] or [[target#heading]]
   const wikiLinkRegex = /\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]/g;
   while ((match = wikiLinkRegex.exec(content)) !== null) {
     let rawTarget = match[1].trim();
@@ -47,7 +47,6 @@ export function resolveLinkTarget(sourcePath: string, rawTarget: string): string
     return path.normalize(cleanTarget.slice(1)).replace(/\\/g, "/");
   }
 
-  // If starts with . or .. (relative to source document directory)
   if (cleanTarget.startsWith(".")) {
     const sourceDir = path.dirname(sourcePath);
     const resolved = path.normalize(path.join(sourceDir, cleanTarget)).replace(/\\/g, "/");
@@ -57,7 +56,6 @@ export function resolveLinkTarget(sourcePath: string, rawTarget: string): string
     return resolved;
   }
 
-  // Otherwise, it is a vault-relative path (e.g. wiki links [[competencies/webassembly]])
   return path.normalize(cleanTarget).replace(/\\/g, "/");
 }
 

@@ -1,36 +1,6 @@
 import matter from "gray-matter";
-
-export interface VerifiedEntry {
-  by: string;
-  at: string;
-}
-
-export interface GeneratedEntry {
-  by: string;
-  at: string;
-}
-
-export interface SourceEntry {
-  id?: string;
-  resource: string;
-  title?: string;
-}
-
-export interface OKFDocument {
-  path: string; // relative to vault
-  type: string;
-  title: string;
-  description?: string;
-  status: string;
-  tags: string[];
-  sources: SourceEntry[];
-  generated?: GeneratedEntry;
-  verified: VerifiedEntry[];
-  trust: "human-reviewed" | "machine-confirmed" | "unverified";
-  persona?: Record<string, any>;
-  frontmatter: Record<string, any>;
-  content: string;
-}
+import { OKFDocument, VerifiedEntry, SourceRelation } from "../domain/document.js";
+import { isHuman } from "../domain/actor.js";
 
 export function normalizeVerified(rawVerified: any): VerifiedEntry[] {
   if (!rawVerified) return [];
@@ -48,8 +18,10 @@ export function normalizeVerified(rawVerified: any): VerifiedEntry[] {
 
 export function determineTrust(verified: VerifiedEntry[]): "human-reviewed" | "machine-confirmed" | "unverified" {
   if (verified.length === 0) return "unverified";
-  if (verified.some((v) => v.by.startsWith("human:"))) return "human-reviewed";
-  if (verified.some((v) => v.by.startsWith("process:") || v.by.startsWith("agent:"))) return "machine-confirmed";
+  if (verified.some((v) => isHuman(v.by))) return "human-reviewed";
+  if (verified.some((v) => v.by.startsWith("process:") || v.by.startsWith("agent:") || v.by.includes("/"))) {
+    return "machine-confirmed";
+  }
   return "unverified";
 }
 
@@ -62,7 +34,7 @@ export function parseDocument(relativePath: string, rawContent: string): OKFDocu
   const description = data.description || "";
   const status = data.status || "stable";
   const tags = Array.isArray(data.tags) ? data.tags.map(String) : [];
-  const sources: SourceEntry[] = Array.isArray(data.sources)
+  const sources: SourceRelation[] = Array.isArray(data.sources)
     ? data.sources.map((s: any) => ({
         id: s.id ? String(s.id) : undefined,
         resource: String(s.resource || ""),
@@ -93,20 +65,5 @@ export function parseDocument(relativePath: string, rawContent: string): OKFDocu
     persona,
     frontmatter: data,
     content: parsed.content.trim(),
-  };
-}
-
-export function validateDocument(doc: OKFDocument): { valid: boolean; errors: string[] } {
-  const errors: string[] = [];
-
-  if (doc.path !== "index.md" && doc.path !== "log.md") {
-    if (!doc.type) {
-      errors.push("Document " + doc.path + " is missing required 'type' in frontmatter");
-    }
-  }
-
-  return {
-    valid: errors.length === 0,
-    errors,
   };
 }

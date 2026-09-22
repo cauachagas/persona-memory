@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
-import { acquireLock } from "./locking.js";
+import { acquireLock } from "./lock.js";
 import { isWorktreeClean, addFiles, commit } from "./git.js";
-import { writeDocumentAtomic, resolveSafePath } from "./vault.js";
+import { writeDocumentAtomic, resolveSafePath } from "../vault/reader.js";
+import { updateVaultIndex } from "../vault/index.js";
 
 export interface RecordCognitiveEventInput {
   title: string;
@@ -12,12 +13,14 @@ export interface RecordCognitiveEventInput {
   related_paths?: string[];
   proposed_state?: string;
   target?: string;
+  source_producer?: string;
 }
 
 export interface RecordCognitiveEventResult {
   eventPath: string;
   commitHash?: string;
   status: "draft";
+  state: "draft";
 }
 
 function slugify(text: string): string {
@@ -37,7 +40,6 @@ export async function recordCognitiveEvent(
   const lock = await acquireLock(vaultRoot);
 
   try {
-    // 1. Verify Git staged worktree is clean
     const clean = await isWorktreeClean(vaultRoot);
     if (!clean) {
       throw new Error(
@@ -45,20 +47,17 @@ export async function recordCognitiveEvent(
       );
     }
 
-    // 2. Generate filename: events/YYYY-MM-DD-<slug>.md
     const now = new Date();
     const dateStr = now.toISOString().slice(0, 10);
     const slug = slugify(input.title) || "cognitive-event";
     const filename = "events/" + dateStr + "-" + slug + ".md";
     const { relativePath, absolutePath } = resolveSafePath(vaultRoot, filename);
 
-    // If file already exists, add timestamp suffix
     let finalRelative = relativePath;
     if (fs.existsSync(absolutePath)) {
       finalRelative = "events/" + dateStr + "-" + slug + "-" + Date.now().toString().slice(-4) + ".md";
     }
 
-    // 3. Build frontmatter & body
     const relatedLinks = (input.related_paths || [])
       .map((p) => "- Relacionado a [" + path.basename(p, ".md") + "](" + p + ")")
       .join("\n");
@@ -75,6 +74,8 @@ export async function recordCognitiveEvent(
       )
       .join("\n");
 
+    const producer = input.source_producer || "process:persona-memory";
+
     const markdownContent =
       "---" +
       "\ntype: cognitive_event" +
@@ -84,28 +85,33 @@ export async function recordCognitiveEvent(
       JSON.stringify(input.summary) +
       "\nstatus: draft" +
       "\ngenerated:" +
-      "\n  by: process:persona-memory" +
+      "\n  by: " +
+      producer +
       "\n  at: " +
       JSON.stringify(now.toISOString()) +
       "\ntags:" +
       "\n  - cognitive-event" +
       "\n  - " +
       slugify(input.event_kind) +
-      (input.target ? "\npersona:\n  event_kind: " + input.event_kind + "\n  target: " + input.target + (input.proposed_state ? "\n  proposed_state: " + input.proposed_state : "") : "\npersona:\n  event_kind: " + input.event_kind) +
+      "\npersona:" +
+      "\n  state: draft" +
+      "\n  event_kind: " +
+      input.event_kind +
+      (input.target ? "\n  target: " + input.target : "") +
+      (input.proposed_state ? "\n  proposed_state: " + input.proposed_state : "") +
       (sourcesBlock ? "\nsources:\n" + sourcesBlock : "") +
       "\n---\n\n" +
-      "# Contexto e Resumo\n\n" +
+      "# Contexto\n\n" +
       input.summary +
-      "\n\n# Detalhes e Observações\n\n" +
+      "\n\n# Observações e Detalhes\n\n" +
       input.details +
       "\n\n# Relações\n\n" +
       (relatedLinks || "Nenhuma relação inicial especificada.") +
       "\n";
 
-    // 4. Write event file atomically
     await writeDocumentAtomic(vaultRoot, finalRelative, markdownContent);
 
-    // 5. Append to log.md
+    // Append to log.md
     const logPath = path.join(vaultRoot, "log.md");
     let logContent = fs.existsSync(logPath) ? fs.readFileSync(logPath, "utf8") : "# Mutation Log\n";
     const header = "## " + dateStr;
@@ -118,8 +124,14 @@ export async function recordCognitiveEvent(
     }
     fs.writeFileSync(logPath, logContent, "utf8");
 
-    // 6. Git commit
-    const filesToStage = [finalRelative, "log.md"];
+    // Update root index
+    try {
+      updateVaultIndex(vaultRoot);
+    } catch (e) {
+      console.error("Warning: could not regenerate index.md:", e);
+    }
+
+    const filesToStage = [finalRelative, "log.md", "index.md"];
     await addFiles(vaultRoot, filesToStage);
     const commitMsg = "memory(event): " + slug.replace(/-/g, " ");
     const commitOutput = await commit(vaultRoot, commitMsg);
@@ -128,6 +140,7 @@ export async function recordCognitiveEvent(
       eventPath: finalRelative,
       commitHash: commitOutput,
       status: "draft",
+      state: "draft",
     };
   } finally {
     lock.release();
