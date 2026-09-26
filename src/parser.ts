@@ -16,6 +16,39 @@ export interface SourceRelation {
   title?: string;
 }
 
+// ─── Temporal / Spaced-Repetition types ──────────────────────────────────────
+
+export type ReviewOutcome = "again" | "hard" | "good" | "easy";
+
+export interface ReviewHistoryEntry {
+  at: string;              // ISO datetime of the review
+  outcome: ReviewOutcome;
+  mastery_before: number;
+  mastery_after: number;
+}
+
+/**
+ * Temporal review state stored inside persona.review frontmatter block.
+ *
+ * Mastery scale (0–5):
+ *   0 = unknown | 1 = heard of it | 2 = understand concept
+ *   3 = apply with reference | 4 = apply fluently | 5 = intuitive / can teach
+ */
+export interface ReviewState {
+  mastery: number;              // 0–5
+  ease_factor: number;          // SM-2 ease factor, ≥ 1.3
+  interval_days: number;        // days until next review, ≥ 1
+  next_review: string;          // "YYYY-MM-DD"
+  review_count: number;
+  last_review: string | null;   // ISO datetime or null
+  review_history: ReviewHistoryEntry[];
+}
+
+/** Document types that carry temporal review state. */
+const TEMPORAL_TYPES = new Set(["heuristic", "belief", "competency", "project", "evidence"]);
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export interface OKFDocument {
   path: string; // bundle-relative, e.g. "/beliefs/modular-monolith.md"
   type: string;
@@ -28,6 +61,8 @@ export interface OKFDocument {
   verified: VerifiedEntry[];
   trust: "human-verified" | "source-backed" | "agent-generated" | "unverified";
   persona?: Record<string, any>;
+  /** Parsed and defaulted review state. Present only for temporal document types. */
+  review?: ReviewState;
   frontmatter: Record<string, any>;
   content: string;
 }
@@ -64,6 +99,63 @@ export function determineTrust(doc: { verified: VerifiedEntry[]; generated?: Gen
   return "unverified";
 }
 
+function todayDateString(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+/**
+ * Parses the `persona.review` block from raw frontmatter, applying safe
+ * defaults so legacy documents (without any temporal fields) continue to
+ * work without errors.
+ */
+export function parseReviewState(rawReview: any): ReviewState {
+  const history: ReviewHistoryEntry[] = [];
+  if (Array.isArray(rawReview?.review_history)) {
+    for (const entry of rawReview.review_history.slice(-10)) {
+      if (
+        entry &&
+        typeof entry.at === "string" &&
+        ["again", "hard", "good", "easy"].includes(entry.outcome)
+      ) {
+        history.push({
+          at: entry.at,
+          outcome: entry.outcome as ReviewOutcome,
+          mastery_before: typeof entry.mastery_before === "number" ? entry.mastery_before : 0,
+          mastery_after: typeof entry.mastery_after === "number" ? entry.mastery_after : 0,
+        });
+      }
+    }
+  }
+
+  return {
+    mastery: clamp(
+      typeof rawReview?.mastery === "number" ? rawReview.mastery : 0,
+      0, 5
+    ),
+    ease_factor: Math.max(
+      1.3,
+      typeof rawReview?.ease_factor === "number" ? rawReview.ease_factor : 2.5
+    ),
+    interval_days: Math.max(
+      1,
+      typeof rawReview?.interval_days === "number" ? rawReview.interval_days : 1
+    ),
+    next_review:
+      typeof rawReview?.next_review === "string" && rawReview.next_review
+        ? rawReview.next_review
+        : todayDateString(),
+    review_count:
+      typeof rawReview?.review_count === "number" ? rawReview.review_count : 0,
+    last_review:
+      typeof rawReview?.last_review === "string" ? rawReview.last_review : null,
+    review_history: history,
+  };
+}
+
 export function parseDocument(relativePath: string, rawContent: string): OKFDocument {
   const parsed = matter(rawContent);
   const data = parsed.data || {};
@@ -92,6 +184,11 @@ export function parseDocument(relativePath: string, rawContent: string): OKFDocu
   const trust = determineTrust({ verified, generated, sources });
   const persona = typeof data.persona === "object" ? data.persona : undefined;
 
+  // Parse temporal review state only for knowledge document types.
+  const review: ReviewState | undefined = TEMPORAL_TYPES.has(type)
+    ? parseReviewState(persona?.review)
+    : undefined;
+
   return {
     path: cleanRel,
     type,
@@ -104,6 +201,7 @@ export function parseDocument(relativePath: string, rawContent: string): OKFDocu
     verified,
     trust,
     persona,
+    review,
     frontmatter: data,
     content: parsed.content.trim(),
   };
@@ -168,6 +266,34 @@ export function validateDocument(doc: OKFDocument): ValidationIssue[] {
       issues.push({ severity: "WARNING", message: "Unexpected persona.state '" + s + "' for cognitive_event" });
     } else if (doc.type === "evidence" && !["retained", "redacted"].includes(s)) {
       issues.push({ severity: "WARNING", message: "Unexpected persona.state '" + s + "' for evidence" });
+    }
+  }
+
+  // Temporal review validation (knowledge docs only)
+  if (TEMPORAL_TYPES.has(doc.type)) {
+    const rawReview = doc.persona?.review;
+    if (!rawReview) {
+      // Legacy doc: no review block at all. Conservative warning only.
+      issues.push({
+        severity: "WARNING",
+        message: "Document " + doc.path + " has no persona.review block (legacy doc — defaults will be applied)",
+      });
+    } else {
+      const m = rawReview.mastery;
+      if (typeof m === "number" && (m < 0 || m > 5)) {
+        issues.push({ severity: "ERROR", message: "Document " + doc.path + " review.mastery out of range [0,5]: " + m });
+      }
+      const ef = rawReview.ease_factor;
+      if (typeof ef === "number" && ef < 1.3) {
+        issues.push({ severity: "ERROR", message: "Document " + doc.path + " review.ease_factor below minimum 1.3: " + ef });
+      }
+      const id = rawReview.interval_days;
+      if (typeof id === "number" && id < 1) {
+        issues.push({ severity: "ERROR", message: "Document " + doc.path + " review.interval_days below minimum 1: " + id });
+      }
+      if (rawReview.next_review && !/^\d{4}-\d{2}-\d{2}$/.test(String(rawReview.next_review))) {
+        issues.push({ severity: "WARNING", message: "Document " + doc.path + " review.next_review is not a valid YYYY-MM-DD date" });
+      }
     }
   }
 

@@ -6,4 +6,5 @@ export * from "./vault.js";
 export * from "./graph.js";
 export * from "./search.js";
 export * from "./mutations.js";
+export * from "./temporal.js";
 export * from "./server.js";

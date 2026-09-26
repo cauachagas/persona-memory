@@ -1,6 +1,6 @@
 {
   "name": "persona-memory",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Agnostic Cognitive Trajectory & Developer Persona Engine for Coding Agents (OKF v0.2 + Obsidian + MCP)",
   "type": "module",
   "main": "dist/src/index.js",

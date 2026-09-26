@@ -8,7 +8,8 @@ import { runServer } from "./server.js";
 import { loadAllDocuments, getAllDocumentPaths, readDocument } from "./vault.js";
 import { validateDocument } from "./parser.js";
 import { searchMemory } from "./search.js";
-import { updateManagedIndex } from "./mutations.js";
+import { updateManagedIndex, recordReviewEvent } from "./mutations.js";
+import { getDueReviews, getReviewStats, getMasteryHeatmap } from "./temporal.js";
 
 async function main() {
   const args = process.argv.slice(2);
@@ -181,6 +182,120 @@ async function main() {
       break;
     }
 
+    case "review": {
+      const subCmd = args[1];
+
+      // ─── review due ─────────────────────────────────────────────────────
+      if (!subCmd || subCmd === "due") {
+        const due = getDueReviews(config.vaultPath);
+        if (due.length === 0) {
+          console.log("✅ Nenhuma revisão vencida. Bom trabalho!");
+          break;
+        }
+        console.log("📚 Revisões vencidas: " + due.length + "\n");
+        for (const r of due) {
+          const bar = "█".repeat(r.review.mastery) + "░".repeat(5 - r.review.mastery);
+          const overdueLabel =
+            r.days_overdue === 0
+              ? "vence hoje"
+              : r.days_overdue === 1
+                ? "1 dia atrás"
+                : r.days_overdue + " dias atrás";
+          const urgent = r.days_overdue >= 7 ? " ⚠️  URGENTE" : "";
+          console.log("• [" + r.type + "] " + r.title);
+          console.log("  " + r.path);
+          console.log(
+            "  Mastery: " + bar + " " + r.review.mastery + "/5 | " +
+            overdueLabel + urgent +
+            " | Revisões: " + r.review.review_count
+          );
+          console.log("");
+        }
+        break;
+      }
+
+      // ─── review stats ────────────────────────────────────────────────────
+      if (subCmd === "stats") {
+        const stats = getReviewStats(config.vaultPath);
+        const heatmap = getMasteryHeatmap(config.vaultPath);
+        console.log("📊 Review Stats\n");
+        console.log("  Total de documentos com revisão: " + stats.total);
+        console.log("  Vencidas hoje:  " + stats.due);
+        console.log("  Atrasadas (>7d): " + stats.overdue);
+        console.log("  Dominados (≥4): " + stats.mastered);
+        console.log("  Aprendendo (≤2): " + stats.learning);
+        console.log("  Desconhecidos (0): " + stats.unknown);
+        console.log("\n📈 Mastery por tipo:");
+        for (const [type, dist] of Object.entries(heatmap.byType)) {
+          const bar = Object.entries(dist)
+            .sort(([a], [b]) => Number(a) - Number(b))
+            .map(([lvl, count]) => lvl + ":" + count)
+            .join("  ");
+          console.log("  " + type.padEnd(16) + bar);
+        }
+
+        if (Object.keys(heatmap.byTag).length > 0) {
+          console.log("\n📋 Mastery por tag:");
+          for (const [tag, dist] of Object.entries(heatmap.byTag)) {
+            const bar = Object.entries(dist)
+              .sort(([a], [b]) => Number(a) - Number(b))
+              .map(([lvl, count]) => lvl + ":" + count)
+              .join("  ");
+            console.log("  " + tag.padEnd(16) + bar);
+          }
+        }
+
+        if (Object.keys(heatmap.byProject).length > 0) {
+          console.log("\n📁 Mastery por projeto:");
+          for (const [project, dist] of Object.entries(heatmap.byProject)) {
+            const bar = Object.entries(dist)
+              .sort(([a], [b]) => Number(a) - Number(b))
+              .map(([lvl, count]) => lvl + ":" + count)
+              .join("  ");
+            console.log("  " + project.padEnd(16) + bar);
+          }
+        }
+        break;
+      }
+
+      // ─── review answer <path> <outcome> ─────────────────────────────────
+      if (subCmd === "answer") {
+        const targetArg = args[2];
+        const outcomeArg = args[3] as "again" | "hard" | "good" | "easy";
+
+        if (!targetArg || !outcomeArg) {
+          console.error("Usage: persona-memory review answer <path> <again|hard|good|easy> [--vault <p>]");
+          process.exit(1);
+        }
+        const validOutcomes = ["again", "hard", "good", "easy"];
+        if (!validOutcomes.includes(outcomeArg)) {
+          console.error("[ERROR] Invalid outcome '" + outcomeArg + "'. Must be: again | hard | good | easy");
+          process.exit(1);
+        }
+
+        console.log("📝 Registrando revisão: " + targetArg + " → " + outcomeArg + " ...");
+        const result = await recordReviewEvent(config.vaultPath, {
+          target: targetArg,
+          outcome: outcomeArg,
+          summary: "Revisão registrada via CLI.",
+          producer: config.producer,
+        });
+        const r = result.newReview;
+        const bar = "█".repeat(r.mastery as number) + "░".repeat(5 - (r.mastery as number));
+        console.log("✅ Revisão registrada!");
+        console.log("  Mastery: " + bar + " " + r.mastery + "/5");
+        console.log("  Próxima revisão: " + r.next_review + " (em " + r.interval_days + " dia(s))");
+        console.log("  Ease factor: " + r.ease_factor);
+        console.log("  Evento: " + result.eventPath);
+        console.log("  Commit: " + (result.commitHash || "n/a"));
+        break;
+      }
+
+      console.error("Usage: persona-memory review <due|stats|answer> [args...]");
+      process.exit(1);
+      break;
+    }
+
     default: {
       console.log("persona-memory CLI v0.1.0\n");
       console.log("Available commands:");
@@ -190,6 +305,9 @@ async function main() {
       console.log("  persona-memory search <query> [--vault <p>]           Search memory with context budget");
       console.log("  persona-memory index [--vault <p>]                    Regenerate index.md managed section");
       console.log("  persona-memory init [--vault <p>]                     Initialize a new vault");
+      console.log("  persona-memory review due [--vault <p>]               List documents with due reviews");
+      console.log("  persona-memory review stats [--vault <p>]             Mastery heatmap and review statistics");
+      console.log("  persona-memory review answer <path> <outcome> [--vault <p>]  Record a review (again|hard|good|easy)");
       break;
     }
   }

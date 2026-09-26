@@ -1,0 +1,7 @@
+workspace = "pessoal"
+project = "persona-memory"
+project_strategy = "repo-root"
+
+[briefing]
+inject_on_session_start = true
+char_budget = 4000

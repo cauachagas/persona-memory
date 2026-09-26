@@ -1,8 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
+import matter from "gray-matter";
 import { acquireLock } from "./locking.js";
 import { isWorktreeClean, addFiles, commit, resetFiles } from "./git.js";
 import { writeDocumentAtomic, resolveSafePath, loadAllDocuments } from "./vault.js";
+import { readDocument } from "./vault.js";
+import { parseReviewState, ReviewOutcome } from "./parser.js";
+import { computeNextReview, reviewStateToFrontmatter } from "./temporal.js";
 
 export interface RecordCognitiveEventInput {
   title: string;
@@ -240,6 +244,210 @@ export async function recordCognitiveEvent(
       throw new Error("ROLLBACK_FAILED: Mutation error: " + err.message + " | Rollback failed: " + rollbackError.message);
     }
 
+    throw err;
+  } finally {
+    lock.release();
+  }
+}
+
+// ─── recordReviewEvent ────────────────────────────────────────────────────────
+
+export interface RecordReviewEventInput {
+  /** Bundle-relative path of the document being reviewed, e.g. "/beliefs/foo.md" */
+  target: string;
+  outcome: ReviewOutcome;
+  /** Brief context of what was reviewed and how it went */
+  summary: string;
+  /** Optional extended notes */
+  details?: string;
+  producer?: string;
+}
+
+export interface RecordReviewEventResult {
+  /** Path of the cognitive_event file created */
+  eventPath: string;
+  /** Path of the reviewed document (updated in place) */
+  targetPath: string;
+  /** New review state after applying SM-2 */
+  newReview: ReturnType<typeof reviewStateToFrontmatter>;
+  commitHash?: string;
+}
+
+/**
+ * Records a spaced-repetition review of a knowledge document:
+ * 1. Reads the target document and computes the next review state via SM-2.
+ * 2. Rewrites the target's frontmatter atomically (preserving all other fields).
+ * 3. Creates a `cognitive_event` of kind `review` in /events/.
+ * 4. Updates log.md and index.md.
+ * 5. Git-stages and commits everything.
+ */
+export async function recordReviewEvent(
+  vaultRoot: string,
+  input: RecordReviewEventInput
+): Promise<RecordReviewEventResult> {
+  const lock = await acquireLock(vaultRoot);
+
+  const indexPath = path.join(vaultRoot, "index.md");
+  const logPath = path.join(vaultRoot, "log.md");
+  const indexSnapshot = fs.existsSync(indexPath) ? fs.readFileSync(indexPath, "utf8") : null;
+  const logSnapshot = fs.existsSync(logPath) ? fs.readFileSync(logPath, "utf8") : null;
+
+  let createdEventAbsolute: string | null = null;
+  let targetSnapshot: string | null = null;
+  let eventRelative = "";
+
+  try {
+    // 1. Validate worktree
+    const clean = await isWorktreeClean(vaultRoot);
+    if (!clean) {
+      throw new Error("VAULT_DIRTY: Working tree has uncommitted or staged changes. Aborting mutation.");
+    }
+
+    // 2. Resolve & read target document
+    const { absolutePath: targetAbsolute, relativePath: targetRelative } =
+      resolveSafePath(vaultRoot, input.target);
+    if (!fs.existsSync(targetAbsolute) || !fs.statSync(targetAbsolute).isFile()) {
+      throw new Error("Target document not found in vault: '" + targetRelative + "'");
+    }
+
+    const rawTarget = fs.readFileSync(targetAbsolute, "utf8");
+    targetSnapshot = rawTarget;
+    const parsedTarget = matter(rawTarget);
+    const targetDoc = readDocument(vaultRoot, input.target);
+
+    // Only temporal document types support review
+    const TEMPORAL_TYPES = new Set(["heuristic", "belief", "competency", "project", "evidence"]);
+    if (!TEMPORAL_TYPES.has(targetDoc.type)) {
+      throw new Error("Document type '" + targetDoc.type + "' does not support temporal review (path: " + targetRelative + ")");
+    }
+
+    // 3. Compute new review state via SM-2
+    const currentReview = parseReviewState(parsedTarget.data?.persona?.review);
+    const newReview = computeNextReview(currentReview, input.outcome);
+
+    // 4. Rewrite target frontmatter (preserving all other fields)
+    const updatedData = {
+      ...parsedTarget.data,
+      persona: {
+        ...(parsedTarget.data?.persona ?? {}),
+        review: reviewStateToFrontmatter(newReview),
+      },
+    };
+    const updatedTargetContent = matter.stringify(parsedTarget.content, updatedData);
+    await writeDocumentAtomic(vaultRoot, input.target, updatedTargetContent);
+
+    // 5. Create cognitive_event of kind "review"
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10);
+    const baseSlug = "review-" + slugify(targetDoc.title || "doc");
+    let candidateName = "events/" + dateStr + "-" + baseSlug + ".md";
+    let counter = 1;
+    while (fs.existsSync(path.resolve(vaultRoot, candidateName))) {
+      const suffix = counter < 10 ? "-0" + counter : "-" + counter;
+      candidateName = "events/" + dateStr + "-" + baseSlug + suffix + ".md";
+      counter++;
+    }
+    eventRelative = "/" + candidateName;
+    const { absolutePath: eventAbsolute } = resolveSafePath(vaultRoot, candidateName);
+    createdEventAbsolute = eventAbsolute;
+
+    const producer = input.producer || "persona-memory/0.1";
+    const eventContent =
+      "---" +
+      "\ntype: cognitive_event" +
+      "\ntitle: " + JSON.stringify("Review: " + targetDoc.title) +
+      "\ndescription: " + JSON.stringify("Revisão espaçada — outcome: " + input.outcome) +
+      "\nstatus: draft" +
+      "\ngenerated:" +
+      "\n  by: " + producer +
+      "\n  at: " + JSON.stringify(now.toISOString()) +
+      "\ntags:" +
+      "\n  - cognitive-event" +
+      "\n  - review" +
+      "\npersona:" +
+      "\n  state: reviewed" +
+      "\n  event_kind: review" +
+      "\n  target: " + (input.target.startsWith("/") ? input.target : "/" + input.target) +
+      "\n  outcome: " + input.outcome +
+      "\n  mastery_before: " + currentReview.mastery +
+      "\n  mastery_after: " + newReview.mastery +
+      "\n---\n\n" +
+      "# Contexto\n\n" + input.summary +
+      "\n\n# Observações e Detalhes\n\n" + (input.details || "Nenhum detalhe adicional.") +
+      "\n";
+
+    await writeDocumentAtomic(vaultRoot, candidateName, eventContent);
+
+    // 6. Update log.md
+    let logContent = fs.existsSync(logPath) ? fs.readFileSync(logPath, "utf8") : "# Mutation Log\n";
+    const header = "## " + dateStr;
+    const commitMsg = "memory(review): " + slugify(targetDoc.title || "doc").replace(/-/g, " ");
+    const logEntry = "- **Reviewed** `" + input.target + "` → outcome: `" + input.outcome + "`, mastery: " +
+      currentReview.mastery + "→" + newReview.mastery + ", next: `" + newReview.next_review + "`\n" +
+      "  Created `" + candidateName + "`";
+
+    if (logContent.includes(header)) {
+      logContent = logContent.replace(header, header + "\n\n" + logEntry);
+    } else {
+      logContent = "# Mutation Log\n\n" + header + "\n\n" + logEntry + "\n\n" +
+        logContent.replace("# Mutation Log", "").trim();
+    }
+    fs.writeFileSync(logPath, logContent.trim() + "\n", "utf8");
+
+    // 7. Update managed index
+    updateManagedIndex(vaultRoot);
+
+    // 8. Git stage + commit
+    const filesToStage = [
+      input.target.replace(/^\//, ""),
+      candidateName,
+      "log.md",
+      "index.md",
+    ];
+    await addFiles(vaultRoot, filesToStage);
+    const commitHash = await commit(vaultRoot, commitMsg);
+
+    return {
+      eventPath: eventRelative,
+      targetPath: targetRelative,
+      newReview: reviewStateToFrontmatter(newReview),
+      commitHash,
+    };
+  } catch (err: any) {
+    // Best-effort rollback
+    let rollbackError: any = null;
+    try {
+      if (createdEventAbsolute && fs.existsSync(createdEventAbsolute)) {
+        fs.unlinkSync(createdEventAbsolute);
+      }
+      // Restore target document to pre-review state
+      if (targetSnapshot !== null) {
+        const { absolutePath: targetAbs } = resolveSafePath(vaultRoot, input.target);
+        fs.writeFileSync(targetAbs, targetSnapshot, "utf8");
+      }
+      if (indexSnapshot !== null) {
+        fs.writeFileSync(indexPath, indexSnapshot, "utf8");
+      }
+      if (logSnapshot !== null) {
+        fs.writeFileSync(logPath, logSnapshot, "utf8");
+      }
+      const filesToReset = [
+        input.target.replace(/^\//, ""),
+        eventRelative.replace(/^\//, ""),
+        "log.md",
+        "index.md",
+      ].filter(Boolean);
+      await resetFiles(vaultRoot, filesToReset);
+    } catch (rbErr) {
+      rollbackError = rbErr;
+    }
+
+    if (rollbackError) {
+      throw new Error(
+        "ROLLBACK_FAILED: Review error: " + err.message +
+        " | Rollback failed: " + rollbackError.message
+      );
+    }
     throw err;
   } finally {
     lock.release();

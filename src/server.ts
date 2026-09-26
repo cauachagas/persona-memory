@@ -4,7 +4,8 @@ import { z } from "zod";
 import { getConfig } from "./config.js";
 import { loadAllDocuments, readDocument } from "./vault.js";
 import { searchMemory } from "./search.js";
-import { recordCognitiveEvent } from "./mutations.js";
+import { recordCognitiveEvent, recordReviewEvent } from "./mutations.js";
+import { getDueReviews, getReviewStats, getMasteryHeatmap } from "./temporal.js";
 
 export function getPersonaContext(
   vaultRoot: string,
@@ -192,6 +193,92 @@ export function createPersonaServer(vaultArg?: string, producerArg?: string): Mc
         return {
           isError: true,
           content: [{ type: "text", text: "Error in record_cognitive_event: " + err.message }],
+        };
+      }
+    }
+  );
+
+  // Tool 5: get_due_reviews
+  server.tool(
+    "get_due_reviews",
+    "Retorna documentos de conhecimento com revisão espaçada vencida ou crítica (slipping). Use no início de uma sessão de estudo para conduzir revisão SM-2 com o usuário.",
+    {
+      include_slipping: z
+        .boolean()
+        .optional()
+        .describe("Se verdadeiro, marca documentos com mais de 7 dias de atraso como urgentes"),
+      max_results: z.number().optional().describe("Máximo de documentos retornados (default: 10)"),
+      include_stats: z
+        .boolean()
+        .optional()
+        .describe("Se verdadeiro, inclui estatísticas gerais de mastery no resultado"),
+    },
+    async (params) => {
+      try {
+        const due = getDueReviews(config.vaultPath);
+        const limited = due.slice(0, params.max_results ?? 10);
+        const stats = params.include_stats ? getReviewStats(config.vaultPath) : undefined;
+
+        const output = {
+          due_count: due.length,
+          shown: limited.length,
+          items: limited.map((r) => ({
+            path: r.path,
+            type: r.type,
+            title: r.title,
+            description: r.description,
+            days_overdue: r.days_overdue,
+            mastery: r.review.mastery,
+            next_review: r.review.next_review,
+            review_count: r.review.review_count,
+            ...(params.include_slipping ? { urgent: r.days_overdue >= 7 } : {}),
+          })),
+          ...(stats ? { stats } : {}),
+        };
+
+        return {
+          content: [{ type: "text", text: JSON.stringify(output, null, 2) }],
+        };
+      } catch (err: any) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: "Error in get_due_reviews: " + err.message }],
+        };
+      }
+    }
+  );
+
+  // Tool 6: record_review_event
+  server.tool(
+    "record_review_event",
+    "Registra o resultado de uma revisão espaçada (SM-2) num documento de conhecimento: actualiza o seu agendamento no frontmatter e cria um cognitive_event de tipo review commitado no Git.",
+    {
+      target: z
+        .string()
+        .describe("Caminho bundle-relative do documento revisado (ex: /beliefs/modular-monolith.md)"),
+      outcome: z
+        .enum(["again", "hard", "good", "easy"])
+        .describe(
+          "Resultado da revisão: again=esqueci completamente | hard=difícil, lembrei parcialmente | good=lembrei bem | easy=trivial"
+        ),
+      summary: z
+        .string()
+        .describe("Breve descrição do que foi revisado e como correu a sessão"),
+      details: z.string().optional().describe("Notas adicionais, dúvidas ou observações da revisão"),
+    },
+    async (input) => {
+      try {
+        const result = await recordReviewEvent(config.vaultPath, {
+          ...input,
+          producer: config.producer,
+        });
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        };
+      } catch (err: any) {
+        return {
+          isError: true,
+          content: [{ type: "text", text: "Error in record_review_event: " + err.message }],
         };
       }
     }
