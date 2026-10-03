@@ -3,7 +3,7 @@
 
 > **Documento:** `persona-memory/PLAN.md` (Source of Truth Canônico)  
 > **Status:** Consolidado pós-grill-me + Validado por probe vivo (Fase 0) + Pronto para Execução (Slice 1)  
-> **Versão:** 0.3.2  
+> **Versão:** 0.3.3  
 > **Autor:** Claude Code + Cauã Chagas  
 > **Fundamentação Integrada:** `docs/architecture/cognitive-ontology.md` (ontologia cognitiva e princípios epistêmicos §§1–19), `docs/hindsight-integration.md`, `docs/mcp-and-cli-reference.md`, `docs/schemas-and-contracts.md`, `docs/okf-profile.md`
 > **Probe:** Hindsight API `0.10.2` local em `:8888` — ver §8 (contrato real congelado em 2026-10-03)
@@ -137,7 +137,10 @@ flowchart TD
     TRIAGE -->|conflict / human_review| STG
 
     EVI --> OPP
+    EVI -->|Evidência suficiente sem OPP| ASS
     PROF --> OPP
+    PROF -.->|Prioridades e metas| COV_POLICY
+    PROF -.->|Preferências de revisão| SM2_ENGINE
 
     OPP -->|Agente avalia via MCP| ASS
     ASS --> COV_POLICY
@@ -252,13 +255,21 @@ Síntese textual (`text`) da observation consolidada pelo Hindsight.
 ```
 
 ### 4.2 Evidence Record (`evidence/evi-<id>.md`)
+> **Contexto como atributo (§18 da ontologia):** O contexto pertence exclusivamente à demonstração empírica na evidência (`contexts[]`), nunca gerando uma Learning Unit separada por variação contextual. A síntese conceitual vive na Learning Unit; os múltiplos contextos vivem nas evidências e capabilities.
+>
+> **Taxonomia dos 8 Tipos de Evidência (§3.3 da ontologia):** Toda evidência qualifica a natureza da demonstração: `behavioral` (comportamento de código), `conceptual` (definição de modelos/domínio), `procedural` (fluxo de deploy/build), `linguistic` (comunicação técnica), `explanation` (justificativa de trade-offs), `application` (uso aplicado de APIs/padrões), `error_correction` (correção autônoma de falha), `comparison` (avaliação comparativa de alternativas).
+
 ```yaml
 ---
 id: "evi-2026-10-03-001"
 source_staging_id: "stg-5bd16909-efec-482d-8822-0204107c0f90"
 content_hash: "a1b2c3d4e5f67890" # herdado do staging (ou recalculado do statement)
 concept_candidate: "dependency-injection"
+evidence_type: "application" # behavioral | conceptual | procedural | linguistic | explanation | application | error_correction | comparison (§3.3)
 statement: "Implementação deliberada de desacoplamento por construtor com foco em testabilidade."
+contexts: # atributo da demonstração (§18); lista de módulos, repositórios ou cenários
+  - "order-service"
+  - "unit-tests"
 qualification:
   proof_count: 2 # herdado da observation
   derived_session_count: 2 # herdado do staging (derivado, ver §4.1)
@@ -277,23 +288,35 @@ O desenvolvedor desacoplou dependências de infraestrutura em 2 sessões distint
 ```
 
 ### 4.3 Learning Opportunity (`opportunities/opp-<id>.md`, top-level — NÃO em `staging/`)
+> **10 Sinais Canônicos de Oportunidade (§3.4 e §§199–210 da ontologia):** O sistema avalia 10 sinais determinísticos para ponderar a oportunidade sem transformá-la em obrigação: (1) `novelty`, (2) `difficulty`, (3) `recurrence`, (4) `goal_relevance`, (5) `inferred_need`, (6) `generalization_potential`, (7) `apparent_gap`, (8) `partial_demonstration`, (9) `behavior_shift`, (10) `evidence_conflict`. Nenhum sinal isolado decide o fluxo inteiro.
+
 ```yaml
 ---
 id: "opp-2026-10-03-001"
 evidence_ref: "[[evidence/evi-2026-10-03-001]]"
 learning_unit_candidate: "dependency-injection"
 signals:
-  novelty: false
-  difficulty: false
-  goal_relevance: true
-  recurrence: true
+  novelty: false # técnica, biblioteca ou conceito novo não visto anteriormente
+  difficulty: false # esforço prolongado, erros repetidos ou alta complexidade observada
+  recurrence: true # padrão recorrente demonstrado através de múltiplos contextos
+  goal_relevance: true # alinhamento explícito com metas ativas no Learning Profile
+  inferred_need: false # pré-requisito técnico inferido a partir da direção do projeto
+  generalization_potential: false # oportunidade de generalizar um padrão pontual para outros módulos
+  apparent_gap: false # lacuna identificada entre teoria e aplicação prática
+  partial_demonstration: false # uso correto com assistência ou demonstração incompleta
+  behavior_shift: false # mudança significativa na abordagem habitual de resolução
+  evidence_conflict: false # contradição empírica entre diferentes demonstrações
 status: "pending_assessment" # pending_assessment | deferred | rejected | actioned
+deferral_reason: null # string informada pelo usuário caso status: deferred (§38.5)
+rejection_reason: null # string informada pelo usuário caso status: rejected (§38.5)
 created_at: "2026-10-03T12:40:00.000Z"
 rationale: "Recorrência alta associada à meta ativa de Clean Architecture no perfil."
 ---
 ```
 
 ### 4.4 Cognitive Assessment (`assessments/assess-<id>.md`)
+> **Gating de Confiança no Assessment (§3.5 e §5.2 da ontologia):** Para que um assessment seja elegível para atualizar o Knowledge State ou cobrir dimensões em §5.2, `provisional_bloom.confidence` deve ser >= 0.70. Se `confidence < 0.70`, o assessment é marcado como inconclusivo (`assessment_insufficient`) e não avança o estado da capability até que haja evidência confirmatória adicional.
+
 ```yaml
 ---
 id: "assess-2026-10-03-001"
@@ -308,7 +331,7 @@ demonstrated_dimensions:
     status: "demonstrated"
 provisional_bloom:
   level: "apply" # remember | understand | apply | analyze | evaluate | create
-  confidence: 0.85
+  confidence: 0.85 # gating: >= 0.70 obrigatório para cobertura de dimensão
   basis: "Uso espontâneo em código próprio sem necessidade de correção pelo agente."
 assistance_required: false
 agent_notes:
@@ -318,6 +341,9 @@ assessed_at: "2026-10-03T12:45:00.000Z"
 ```
 
 ### 4.5 Capability Definition (`capabilities/cap-<id>.md`)
+> **Teste Canônico de Granularidade (§9 / §600 da ontologia):**
+> *"Se não conseguimos imaginar uma evidência observável direta capaz de demonstrar a capability, provavelmente ela está abstrata demais."* Propostas de capabilities sem ancoragem operacional observável devem ser rejeitadas ou decompostas antes de consolidação canônica.
+
 ```yaml
 ---
 id: "cap-di-constructor"
@@ -403,6 +429,8 @@ Explorar o nível **Analisar**: avaliar prós e contras entre injeção manual (
 ```
 
 ### 4.8 Review Outcome (`reviews/rev-<id>.md`)
+> **Ponte Categórica e Numérica (§22 da ontologia):** O LLM avalia cada dimensão testada de forma categórica (`demonstrated | partial | not_demonstrated`). O motor determinístico mapeia essas saídas para valores numéricos (`demonstrated = 5`, `partial = 3`, `not_demonstrated = 1`), calculando deterministicamente a nota q (entre 1 e 5) do SM-2 sem alucinações.
+
 ```yaml
 ---
 id: "rev-2026-10-03-di-01"
@@ -411,7 +439,11 @@ tested_capability: "cap-di-constructor"
 content_hash: "a1b2c3d4e5f67890" # hash do challenge_prompt + user_response_summary
 timestamp: "2026-10-03T13:00:00.000Z"
 tested_bloom_level: "apply"
-rubric_scores:
+dimensional_outcomes: # avaliação categórica por dimensão (§22 da ontologia)
+  correctness: "demonstrated" # demonstrated | partial | not_demonstrated
+  autonomy: "demonstrated"
+  contextual_variation: "partial"
+rubric_scores: # mapeamento determinístico: demonstrated=5, partial=3, not_demonstrated=1
   technical_accuracy: 5 # 1-5
   autonomy: 5          # 1-5
   depth: 4             # 1-5
@@ -499,14 +531,17 @@ Descrição da contradição comportamental observada entre diferentes contextos
 
 ### 4.12 Proposal Record (`staging/proposals/proposal-<id>.md`)
 
-> **Fila de propostas de novas capabilities para confirmação humana** (§6 Slice 4). `id`: `proposal-YYYY-MM-DD-NNN`.
+> **Fila de propostas de novas capabilities ou dimensões para confirmação humana** (§6 Slice 4 e §12 da ontologia). `id`: `proposal-YYYY-MM-DD-NNN`.
+> **Rejeição como Feedback (§38.5 da ontologia):** Quando o usuário rejeita uma proposta informando um motivo (`rejection_reason`), a justificativa fica registrada permanentemente e o consolidador semântico é deterministamente bloqueado de re-propor a mesma capability ou dimensão a menos que surjam novas evidências empíricas distintas.
 
 ```yaml
 ---
 id: "proposal-2026-10-03-001"
+type: "capability" # capability | dimension
 evidence_ref: "[[evidence/evi-2026-10-03-001]]"
 learning_unit_candidate: "dependency-injection"
-proposed_capability:
+target_capability_id: "cap-di-constructor" # obrigatório se type: dimension
+proposed_capability: # presente se type: capability
   id: "cap-di-constructor"
   title: "Injeção de Dependências por Construtor"
   description: "Capacidade de desacoplar classes e serviços recebendo dependências via construtor e interfaces."
@@ -514,13 +549,15 @@ proposed_capability:
     - "correctness"
     - "autonomy"
     - "contextual_variation"
+proposed_dimension: null # ex: { name: "container_interop", description: "Interoperabilidade com containers IoC" } se type: dimension
 status: "pending_human_confirmation" # pending_human_confirmation | accepted | rejected | merged
+rejection_reason: null # string informada pelo usuário caso status: rejected (§38.5)
 created_at: "2026-10-03T12:55:00.000Z"
 confirmed_at: null
 ---
 
-# Proposta de Nova Capability
-Proposta gerada a partir da evidência empírica aguardando confirmação do usuário.
+# Proposta Estrutural
+Proposta gerada a partir da evidência empírica aguardando confirmação do usuário (via CLI ou entrevista).
 ```
 
 ### 4.13 Audit Record (`staging/audits/audit-<id>.md`)
@@ -550,6 +587,10 @@ Notas sobre a validação amostral da precisão da auto-promoção.
 ### 5.1 Política de Triagem (Triage Policy v0.1)
 
 > `distinct_session_count` = `derived_session_count` do staging (§4.1).
+>
+> **Guarda Epistêmica (§7 e §45 da ontologia):** `proof_count` mede estritamente recorrência comportamental observada, nunca domínio cognitivo (`Behavior ≠ cognition`). A triagem apenas promove recorrência em evidência empírica formal (`evidence/`), cabendo ao assessment posterior (§4.4) avaliar compreensão real.
+>
+> **Curadoria Manual e Auditoria (§29 da ontologia):** Observações em staging podem ser rejeitadas diretamente com motivo (`persona-memory staging reject <id> --reason "<motivo>"`) ou amostradas para validação de precisão (`persona-memory staging audit <id>`, gerando `staging/audits/audit-<id>.md`, §4.13).
 
 ```text
 SE proof_count >= 3
@@ -572,9 +613,10 @@ SENÃO:
 ### 5.2 Política de Crescimento de Capability (Capability Growth Policy v0.1)
 
 ```text
-SE todas as required_dimensions possuem demonstração confirmada
-  E distinct_contexts >= 2
-ENTÃO:
+SE assessment.confidence < 0.70:
+  status_change = blocked (assessment_insufficient: confiança abaixo do limiar determinístico de gating §4.4)
+SENÃO SE todas as required_dimensions possuem demonstração confirmada
+  E distinct_contexts >= 2:
   status = "consolidated"
 SENÃO SE autonomy == true E correctness == true:
   status = "developing"
@@ -583,6 +625,8 @@ SENÃO:
 ```
 
 ### 5.3 Política de Revisão SM-2 (Review Policy v0.1)
+
+> **Ponte Dimensional-Rubrica (§22 da ontologia):** Quando a avaliação fornece `dimensional_outcomes` categóricos (`demonstrated`, `partial`, `not_demonstrated`), o sistema mapeia deterministamente para os scores numéricos: `demonstrated = 5`, `partial = 3`, `not_demonstrated = 1` antes de calcular q.
 
 Rubrica socrática fornecida pelo LLM (A, U, D entre 1 e 5):
 `q = round(0.5 * A + 0.3 * U + 0.2 * D)`
@@ -620,21 +664,22 @@ Rubrica socrática fornecida pelo LLM (A, U, D entre 1 e 5):
 - [ ] Resolução de sessões distintas via `GET /v1/default/banks/{bank}/memories/{memory_id}` com cache local LRU para derivar `derived_session_count` e preencher `provenance.derivation`
 - [ ] Parser defensivo para `entities` (string `""` → `[]`, array → usa, null/undefined → `[]`)
 - [ ] Triage determinística (policy §5.1): `auto_promote` / `pending_further_evidence` / `human_review` / `conflict`
-- [ ] CLI `sync`, `staging list`, `staging triage`, `validate`
+- [ ] CLI `sync`, `staging list`, `staging triage`, `staging reject`, `staging audit`, `validate`
 - [ ] MCP `sync_hindsight_observations`, `get_staging_queue`, `triage_staging`, `validate_vault`
-- [ ] Teste de idempotência (sync 3×) + fixtures de triage; métricas do slice: `observations_imported, staging_created, auto_promoted, human_review, rejected, conflicts, duplicates`
+- [ ] Teste de idempotência (sync 3×) + fixtures de triage; métricas do slice: `observations_imported, staging_created, auto_promoted, human_review, rejected, conflicts, duplicates, promotion_precision`
 - [ ] Fora de escopo neste slice: assessment, SM-2
 
 ### Vertical Slice 2: Evidence → Learning Opportunity
 > O sistema encontra oportunidades sem transformar tudo em obrigação?
-- [ ] Schema de opportunity com sinais (`novelty, difficulty, goal_relevance, recurrence`, §4.3) — sinais são evidência para a decisão, não prioridade universal
+- [ ] Schema de opportunity com suporte aos 10 sinais canônicos da ontologia (`novelty, difficulty, recurrence, goal_relevance, inferred_need, generalization_potential, apparent_gap, partial_demonstration, behavior_shift, evidence_conflict`, §4.3) + campos de feedback `deferral_reason` e `rejection_reason` (§38.5) — sinais são evidência para a decisão, não prioridade universal
+- [ ] Validação dos 8 tipos de evidência (`evidence_type: behavioral | conceptual | procedural | linguistic | explanation | application | error_correction | comparison`, §4.2)
 - [ ] Detecção comparando evidências contra o Learning Profile (`profile/learning-profile.md`, §4.9); se o arquivo não existir, inicializar template padrão sem metas (`goal_relevance: false`)
-- [ ] CLI `opportunity list`, `opportunity defer` + MCP `get_learning_opportunities`
+- [ ] CLI `opportunity list`, `opportunity defer`, `opportunity reject` + MCP `get_learning_opportunities`
 - [ ] Métricas do slice: `opportunities_detected, actioned, deferred, rejected`
 
 ### Vertical Slice 3: Opportunity → Cognitive Assessment
 > A sondagem acrescenta informação que a evidence não tinha?
-- [ ] Schema de assessment + provisional Bloom (`level, confidence, basis`, §4.4)
+- [ ] Schema de assessment + provisional Bloom (`level, confidence, basis`, §4.4) com trava determinística de confiança (confidence >= 0.70 para progressão de estado)
 - [ ] MCP `submit_cognitive_assessment` (LLM submete interpretação dimensional; código valida deterministamente — Q6)
 - [ ] Gerador determinístico de Socratic Probes + MCP `start_socratic_probe` (geração de desafio contextual e rubrica sob demanda para evidência insuficiente, revisão SM-2 ou resolução de conflitos)
 - [ ] Casos de teste da ontologia cognitiva (`docs/architecture/cognitive-ontology.md` §32) adaptados ao contexto de desenvolvimento:
@@ -643,38 +688,50 @@ Rubrica socrática fornecida pelo LLM (A, U, D entre 1 e 5):
   - *Caso C (Erro corrigido):* Ex: código corrigido após sugestão do agente; distingue uso dependente de auxílio vs. autonomia genuína (`autonomy: false`).
 - [ ] Métricas do slice: `assessments_run, socratic_probes, probes_avoided_due_to_sufficient_evidence, assessment_insufficient`
 
-### Vertical Slice 4: Capability Consolidation
+### Vertical Slice 4: Capability Consolidation & Dimension Proposals
 > Merge vs. criação: qual a frequência?
-- [ ] Schema de capability + proposal (`staging/proposals/`, §4.5 e §4.12)
-- [ ] Consolidação semântica com três saídas: attach a capability existente, merge de duplicatas de granularidade, ou nova proposal
-- [ ] Confirmação humana obrigatória para capabilities canônicas estruturais (governança §38.3 do GPT-2)
-- [ ] CLI `capability list` + gestão de propostas: `persona-memory proposal list`, `proposal approve <id>`, `proposal reject <id>`
+- [ ] Schema de capability + proposal (`staging/proposals/`, §4.5 e §4.12) com suporte a propostas estruturais de capability e de dimensão (`type: capability | dimension`, §12 da ontologia)
+- [ ] Aplicação do Teste Canônico de Granularidade (§9 / §600 da ontologia): propostas de capabilities abstratas sem evidência observável direta são rejeitadas ou decompostas
+- [ ] Consolidação semântica com três saídas: attach a capability existente, merge de duplicatas de granularidade, ou nova proposal (capability ou dimensão)
+- [ ] Confirmação humana obrigatória para capabilities canônicas estruturais e dimensões (governança §38.3 do GPT-2)
+- [ ] CLI `capability list` + gestão de propostas: `persona-memory proposal list`, `proposal approve <id>`, `proposal reject <id> --reason "<motivo>"` (com regra anti-reincidência §38.5)
 - [ ] MCP `get_capability`
-- [ ] Métricas do slice: `capabilities_created, merged, rejected, growth_events`
+- [ ] Métricas do slice: `capabilities_created, merged, rejected, capability_proposals, attached, human_confirmed, capability_growth_events`
 
 ### Vertical Slice 5: Evidence Coverage → Knowledge State Update
 > A policy evita sondagens desnecessárias sem atualizar cedo demais?
-- [ ] Avaliador de cobertura de dimensões + growth policy (§5.2: `consolidated` / `developing` / `emerging`)
+- [ ] Avaliador de cobertura de dimensões + growth policy (§5.2: `consolidated` / `developing` / `emerging`) com gating de confiança >= 0.70
 - [ ] Gerador de KSU (§4.6) + materialização do knowledge (`knowledge/*.md`, §4.7); ferramenta `update_knowledge_state` direta segue banida — toda mutação passa por `ksu-*.md` (Q6)
 - [ ] CLI `knowledge show <learning-unit>` e `knowledge rebuild` (replay ordenado evidence → assessment → KSU com reconstrução byte-idêntica — critério de aceite, Q10)
 - [ ] MCP `get_knowledge_state`
 
 ### Vertical Slice 6: Manutenção Temporal SM-2 e Ciclo Fechado
 > Revisões mantêm retenção sem virar obrigação?
-- [ ] Motor SM-2 determinístico + cálculo de q = round(0.5 * A + 0.3 * U + 0.2 * D) (§5.3); LLM fornece só a rubrica A, U, D
+- [ ] Motor SM-2 determinístico com suporte a avaliações dimensionais categóricas (`demonstrated | partial | not_demonstrated`, §22) e cálculo de q = round(0.5 * A + 0.3 * U + 0.2 * D) (§5.3)
 - [ ] CLI `review due`, `review run <learning-unit>`
 - [ ] MCP `get_due_reviews` e `submit_review_outcome` (grava `reviews/rev-*.md`, atualiza `next_review` no knowledge)
 - [ ] MCP `get_persona_context` (briefing passivo de contexto: metas ativas, capacidades e avisos discretos de revisões vencidas sem quebrar flow)
 - [ ] Retain do marco cognitivo de volta no Hindsight com `context: "persona-memory-sm2-review"` (fail-open: falha grava `hindsight_retained: false` e retenta no próximo sync, nunca rollback — §8.3 item 6)
 - [ ] Skill `/study` para sessões socráticas sob demanda (sem interromper flow — Q9)
-- [ ] Métricas do slice: `reviews_due, completed, successes, failures`
+- [ ] Métricas do slice: `reviews_due, reviews_completed, review_successes, review_failures`
 
 ### Vertical Slice 7: Learning Profile e Entrevista Periódica
 > O perfil governa sem vazar para identidade?
 - [ ] Schema de `profile/learning-profile.md` (§4.9: metas com prioridade, preferências de estilo/frequência, disposições `sufficient_for_now`)
-- [ ] CLI `profile show`, `profile interview` + MCP `run_profile_interview` (calibra metas e interesses)
-- [ ] Entrevista periódica de recalibração disparada por padrões novos do Hindsight (não por agenda fixa)
+- [ ] Roteiro canônico de entrevista inicial (§36 da ontologia):
+  1. *Metas imediatas:* "No que você está trabalhando ou quer dominar nas próximas semanas?"
+  2. *Áreas ativas vs. background:* "Quais temas você quer acompanhar ativamente vs. apenas resolver conforme aparecem?"
+  3. *Tópicos suficientes:* "Há áreas onde seu nível atual é 'suficiente por enquanto' e você não quer sugestões?"
+  4. *Estilo de feedback:* "Prefere desafios práticos rápidos, discussões conceituais ou apenas tracking silencioso?"
+  5. *Intensidade:* "Com que frequência você tolera provocações socráticas no seu fluxo?"
+  6. *Conexões externas:* "Há projetos ou contextos específicos que você quer usar como âncora de aprendizado?"
+- [ ] Regra anti-repetição (§37 da ontologia): Perguntas já respondidas ou inferidas com alta confiança nunca são repetidas; a entrevista foca estritamente em calibrar divergências ou novidades.
+- [ ] Gatilhos de recalibração periódica (§37 da ontologia) disparados por padrões do Hindsight (não por agenda fixa):
+  - *Exemplo A (Aumento de atividade):* "Notamos aumento de atividade em PostgreSQL nas últimas duas semanas. Deseja tornar essa uma área de aprendizado ativo, secundária, ou manter apenas como tracking silencioso?"
+  - *Exemplo B (Proposta de dimensão com evidências acumuladas, §12):* "Você demonstrou injeção de dependências em múltiplos contextos com autonomia. Faz sentido adicionar a dimensão 'container_interop' para avaliar integração com containers IoC?"
+- [ ] CLI `profile show`, `profile interview` + MCP `run_profile_interview` (calibra metas, interesses e avalia propostas de dimensão e capability pendentes)
 - [ ] Critério de aceite: metas ativas cobrem as oportunidades sem nenhum rótulo de identidade no perfil (§1.1)
+- [ ] Métricas do slice: `interviews_run, goals_updated, dispositions_added, dimension_proposals_accepted, dimension_proposals_rejected`
 
 ### 6.1 Separações que cada slice deve preservar (fonte: `docs/architecture/cognitive-ontology.md` §§17–19)
 
@@ -683,11 +740,15 @@ Rubrica socrática fornecida pelo LLM (A, U, D entre 1 e 5):
   rever. Lacuna sem interesse = nenhuma ação, nenhuma obrigação de estudo.
 - **Contexto é atributo, não entidade** (§18): evidência num contexto não prova domínio geral,
   mas não criar uma Learning Unit por combinação contextual. Síntese na Learning Unit,
-  contextos como lista nas evidências/capabilities.
+  contextos como lista nas evidências/capabilities (`contexts: []`, §4.2).
 - **Conflitos explícitos** (§19): `staging/conflicts/conflict-<id>.md` (§4.11) com `with[]`, `context[]`,
   `status: pending_resolution`; resoluções fechadas: `resolved_as_exception | resolved_as_context_change |
-  resolved_as_evolution | resolved_as_error`. Nem todo conflito gera probe — só se houver questão
-  cognitiva que valha investigar.
+  resolved_as_evolution | resolved_as_error`.
+  **Critério Conflito → Probe (§19 da ontologia):** Um conflito NÃO abre probe socrático automaticamente.
+  A política só abre probe se houver uma questão cognitiva acionável relevante às metas ativas do `Learning Profile`
+  (ex.: "o usuário compreende a diferença estrutural entre as duas abordagens conflitantes ou houve lapso?").
+  Se for apenas divergência situacional ou preferência de biblioteca em projetos distintos, classifica-se diretamente como
+  `resolved_as_context_change` ou `resolved_as_exception` e encerra-se sem interrupção socrática.
 
 ### 6.2 Matriz Consolidada de Ferramentas MCP e Comandos CLI
 
@@ -699,13 +760,15 @@ Rubrica socrática fornecida pelo LLM (A, U, D entre 1 e 5):
 | `validate_vault` / `validate` | MCP & CLI | Slice 1 | Validação estrutural OKF, Zod e integridade |
 | `persona-memory sync` | CLI | Slice 1 | Sincronização manual via terminal ou hook |
 | `persona-memory staging list/triage` | CLI | Slice 1 | Gestão da fila de observações via terminal |
+| `persona-memory staging reject` | CLI | Slice 1 | Rejeição manual de observação com justificativa |
+| `persona-memory staging audit` | CLI | Slice 1 | Registro de auditoria amostral gerando `audit-*.md` |
 | `get_learning_opportunities` | MCP | Slice 2 | Oportunidades detectadas cruzando perfil |
-| `persona-memory opportunity list/defer` | CLI | Slice 2 | Consulta e adiamento de oportunidades |
+| `persona-memory opportunity list/defer/reject` | CLI | Slice 2 | Consulta, adiamento e rejeição de oportunidades |
 | `start_socratic_probe` | MCP | Slice 3 | Geração determinística de desafio e rubrica |
 | `submit_cognitive_assessment` | MCP | Slice 3 | Submissão de análise dimensional pelo agente |
 | `get_capability` | MCP | Slice 4 | Consulta a definições de capabilities ativas |
 | `persona-memory capability list` | CLI | Slice 4 | Listagem de capabilities conhecidas |
-| `persona-memory proposal list/approve` | CLI | Slice 4 | Governança humana sobre novas capabilities |
+| `persona-memory proposal list/approve/reject` | CLI | Slice 4 | Governança humana sobre capabilities e dimensões |
 | `get_knowledge_state` | MCP | Slice 5 | Leitura do estado materializado da Learning Unit |
 | `persona-memory knowledge show/rebuild`| CLI | Slice 5 | Inspeção e reconstrução determinística do cofre |
 | `get_persona_context` | MCP | Slice 6 | Briefing de contexto e avisos passivos ao LLM |
@@ -798,6 +861,20 @@ Probe executado contra servidor local em `:8888` (bank `learner-episodic`, 2 ret
 ---
 
 ## 9. Auditoria, Reversibilidade e Fora do MVP (fonte: `docs/architecture/cognitive-ontology.md` §§39–42)
+
+### 9.1 Métricas Unificadas do Sistema (§39 da ontologia)
+
+| Métrica | Slice | Descrição |
+| :--- | :--- | :--- |
+| `promotion_precision` | Slice 1 | Taxa de precisão da triagem automática verificada via auditorias amostrais (`staging/audits/`, §4.13) |
+| `attached` | Slice 4 | Evidências vinculadas diretamente a capabilities existentes sem criação de novas entidades |
+| `capability_proposals` | Slice 4 | Propostas estruturais de novas capabilities ou dimensões submetidas para governança humana (§4.12) |
+| `human_confirmed` | Slice 4 & 7 | Propostas de capabilities ou dimensões formalmente aceitas pelo desenvolvedor |
+| `capabilities_created` | Slice 4 | Novas capabilities canônicas materializadas no cofre após confirmação |
+| `review_successes` | Slice 6 | Sessões socráticas SM-2 concluídas com nota q >= 3 (manutenção/aumento do intervalo) |
+| `review_failures` | Slice 6 | Sessões socráticas SM-2 concluídas com nota q < 3 (reset do intervalo / lapso) |
+
+### 9.2 Rastreabilidade, Reversibilidade e Fora do MVP
 
 **Cadeia de rastreabilidade** (toda transição aponta para baixo; ver Q10):
 `knowledge/ → updates/ksu-*.md → assessments/ → evidence/ → staging/ → Hindsight observation → experiência`.
