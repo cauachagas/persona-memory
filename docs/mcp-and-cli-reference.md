@@ -215,7 +215,7 @@ O servidor MCP expõe as ferramentas abaixo para qualquer agente de codificaçã
 ---
 
 ### 1.11 `submit_review_outcome`
-- **Descrição:** Recebe as notas da rubrica atribuídas pelo agente após a resposta do usuário, calcula deterministamente o SM-2 (nota $q$, novo $EF$ e intervalo $I_n$), atualiza o Knowledge State, registra o arquivo em `reviews/` e faz o `retain` no Hindsight para fechar o ciclo.
+- **Descrição:** Recebe as notas da rubrica atribuídas pelo agente após a resposta do usuário, calcula deterministamente o SM-2 (nota q, novo EF e intervalo I_n), atualiza o Knowledge State, registra o arquivo em `reviews/` e faz o `retain` no Hindsight para fechar o ciclo.
 - **Inputs:**
   ```json
   {

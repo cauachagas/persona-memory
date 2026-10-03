@@ -584,14 +584,14 @@ SENÃO:
 
 ### 5.3 Política de Revisão SM-2 (Review Policy v0.1)
 
-Rubrica socrática fornecida pelo LLM ($A, U, D \in [1, 5]$):
-$$q = \text{round}(0.5 \times A + 0.3 \times U + 0.2 \times D)$$
+Rubrica socrática fornecida pelo LLM (A, U, D entre 1 e 5):
+`q = round(0.5 * A + 0.3 * U + 0.2 * D)`
 
 **Cálculo determinístico do SM-2:**
-1. Se $q < 3$ (Lapso): $\text{repetition} = 0$, $\text{interval} = 1\text{ dia}$, $EF' = \max(1.3, EF - 0.2)$.
-2. Se $q \ge 3$ (Sucesso):
-   $$EF' = \max\left(1.3, EF + (0.1 - (5 - q) \times (0.08 + (5 - q) \times 0.02))\right)$$
-   $$I_1 = 1,\quad I_2 = 6,\quad I_n = \text{round}(I_{n-1} \times EF') \quad (n \ge 3)$$
+1. Se `q < 3` (Lapso): `repetition = 0`, `interval = 1 dia`, `EF' = max(1.3, EF - 0.2)`.
+2. Se `q >= 3` (Sucesso):
+   `EF' = max(1.3, EF + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02)))`
+   `I_1 = 1, I_2 = 6, I_n = round(I_{n-1} * EF') (n >= 3)`
 3. **Ciclo Fechado:** `POST /v1/default/banks/{bank}/memories` com `{"items":[{content: "[COGNITIVE MILESTONE...]", context: "persona-memory-sm2-review", metadata: {source, review_id, learning_unit, grade_q}}]}` (ver §8). Sem outbox v0.1: se o `retain` falhar, grava `hindsight_retained: false` e segue (fail-open, retry no próximo sync) — nunca rollback de `rev-*.md`.
 
 ---
@@ -661,7 +661,7 @@ $$q = \text{round}(0.5 \times A + 0.3 \times U + 0.2 \times D)$$
 
 ### Vertical Slice 6: Manutenção Temporal SM-2 e Ciclo Fechado
 > Revisões mantêm retenção sem virar obrigação?
-- [ ] Motor SM-2 determinístico + cálculo de $q = \text{round}(0.5A + 0.3U + 0.2D)$ (§5.3); LLM fornece só a rubrica $A, U, D$
+- [ ] Motor SM-2 determinístico + cálculo de q = round(0.5 * A + 0.3 * U + 0.2 * D) (§5.3); LLM fornece só a rubrica A, U, D
 - [ ] CLI `review due`, `review run <learning-unit>`
 - [ ] MCP `get_due_reviews` e `submit_review_outcome` (grava `reviews/rev-*.md`, atualiza `next_review` no knowledge)
 - [ ] MCP `get_persona_context` (briefing passivo de contexto: metas ativas, capacidades e avisos discretos de revisões vencidas sem quebrar flow)
@@ -740,7 +740,7 @@ Abaixo estão os 10 questionamentos mais duros sobre a arquitetura e as resposta
 **R:** O LLM do agente não tem permissão de escrita arbitrária no cofre. A única ferramenta MCP disponível para ele é `submit_cognitive_assessment`, onde ele envia apenas a interpretação dimensional. O código TypeScript valida o schema, aplica a `Capability Growth Policy` e, se e somente se as dimensões forem satisfeitas, gera um arquivo imutável `updates/ksu-*.md` e materializa o `knowledge/*.md`. **Uma ferramenta `update_knowledge_state` direta é explicitamente banida** (proposta preliminar descartada): toda mutação passa por KSU.
 
 ### Q7: O que é o "Ciclo Fechado" e por que ele é crucial?
-**R:** Sem o retain de volta para o Hindsight, o Hindsight continuaria inferindo que o desenvolvedor possui dificuldades ou dúvidas sobre tópicos que já foram consolidados e testados no `persona-memory`. Quando o `submit_review_outcome` roda com sucesso ($q \ge 3$), ele grava um retain no banco `learner-episodic`, ensinando o Hindsight que aquele padrão agora é um marco consolidado.
+**R:** Sem o retain de volta para o Hindsight, o Hindsight continuaria inferindo que o desenvolvedor possui dificuldades ou dúvidas sobre tópicos que já foram consolidados e testados no `persona-memory`. Quando o `submit_review_outcome` roda com sucesso (q >= 3), ele grava um retain no banco `learner-episodic`, ensinando o Hindsight que aquele padrão agora é um marco consolidado.
 
 ### Q8: Como lidar com o acúmulo de arquivos Markdown com o passar dos anos?
 **R:** A estrutura particionada (`staging/`, `evidence/`, `assessments/`, `updates/`, `reviews/`) permite que arquivos históricos funcionem como um log append-only. A leitura diária dos agentes acessa exclusivamente a pasta `knowledge/` (que são as projeções materializadas) e `profile/`, mantendo o consumo de I/O e tokens minúsculo mesmo em cofres com dezenas de milhares de evidências.
