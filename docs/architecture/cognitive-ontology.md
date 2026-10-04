@@ -1025,6 +1025,38 @@ O Probe não é um exame obrigatório após cada Evidence.
 
 A manutenção temporal permanece separada da avaliação cognitiva.
 
+## 21.1 Review Eligibility Gate
+
+SM-2 **não** serve para consolidar uma Capability. Growth (§12, §34) mede formação; SM-2 mede necessidade de revalidação temporal.
+
+```text
+Review eligibility:
+
+SE capability.status != consolidated
+ENTÃO
+    não criar Review Schedule
+    não inicializar SM-2
+
+SE capability.status == consolidated
+    E Review Policy determinar necessidade de revisão
+ENTÃO
+    criar/agendar Review
+    aplicar SM-2 após Review Outcome
+```
+
+Consequência:
+
+```text
+emerging/developing
+    → continuam sendo acompanhadas por Evidence + Assessment + Coverage
+    → podem receber novas Opportunities e Socratic Probes
+    → não possuem ciclo SM-2
+
+consolidated
+    → passa a ter elegibilidade para Review
+    → Review Outcome alimenta SM-2
+```
+
 Fluxo:
 
 ```text
@@ -1573,6 +1605,8 @@ Review Policy
 SM-2
 ```
 
+> **Gate (§21.1):** `review_due` só existe para capabilities `consolidated`. Capabilities `emerging`/`developing` não entram na fila de revisão — são acompanhadas por cobertura (§12, §34), não por SM-2.
+
 Objetivo:
 
 > verificar e reforçar conhecimentos relevantes sem misturar o mecanismo de revisão com a semântica do Knowledge State.
@@ -1889,4 +1923,6 @@ Human intent governs objectives and meaningful profile changes.
 Automation should be measured, sampled and reversible.
 
 Knowledge State is reconstructible.
+
+Growth forms capabilities; SM-2 only revalidates consolidated ones.
 ```
